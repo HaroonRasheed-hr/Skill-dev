@@ -8,7 +8,7 @@ export const labels: Label[] = [
   { name: 'traffic light', color: '#ef4444' },
 ];
 
-export type Project = { id: number; name: string; owner: string; updated: string; labels: Label[]; description?: string; color?: string; thumbnail?: string };
+export type Project = { id: number; name: string; owner: string; updated: string; labels: Label[]; description?: string; color?: string; thumbnail?: string; media?: string[]; images?: number; annotated?: number; created?: string };
 
 export const projects: Project[] = [
   { id: 1, name: 'Urban Street Detection', owner: 'haroon', updated: '2 hours ago', labels },

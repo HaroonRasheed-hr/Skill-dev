@@ -38,6 +38,9 @@
 }
 
 @layer base {
+  /* Scale the whole rem-based UI down so it looks right at 100% browser zoom */
+  html { font-size: 87.5%; }
+  @media (min-width: 1920px) { html { font-size: 100%; } }
   *, ::before, ::after { border-color: var(--color-line); }
   input, button, textarea, select { font-family: inherit; }
 }

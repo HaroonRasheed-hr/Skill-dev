@@ -275,6 +275,8 @@ export default function CreateProject() {
     projects.push({
       id: Math.max(0, ...projects.map((p) => p.id)) + 1, name: name.trim(), owner: 'haroon', updated: 'just now', labels,
       description: description.trim() || undefined, color,
+      media: allMedia.filter((m) => m.file.type.startsWith('image')).map((m) => URL.createObjectURL(m.file)),
+      images: allMedia.length, annotated: dataset?.annotated ?? 0, created: new Date().toISOString(),
       // Own object URL so it survives this page revoking its preview URLs on unmount
       thumbnail: thumbnail && !thumbnail.file.type.startsWith('video') ? URL.createObjectURL(thumbnail.file) : undefined,
     });
