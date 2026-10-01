@@ -1,6 +1,6 @@
 import { Link, useParams } from 'react-router-dom';
-import { Calendar, ChevronRight, Clock, Eye, Image, MoreVertical, Tag } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { Calendar, ChevronDown, ChevronRight, Clock, Eye, HelpCircle, Image, MoreVertical, Tag, Upload, X } from 'lucide-react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Empty } from '../components/ui';
 import { projects, tasks } from '../data/mock';
 
@@ -54,7 +54,110 @@ function BarChart({ data }: { data: { name: string; value: number; color: string
   );
 }
 
+const FORMATS = ['COCO 1.0', 'YOLO 1.1', 'Pascal VOC 1.1', 'CVAT for images 1.1', 'Datumaro 1.0', 'Segmentation mask 1.1'];
+
+function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button type="button" role="switch" aria-checked={on} onClick={() => onChange(!on)}
+      className={`relative h-6 w-11 shrink-0 rounded-full transition ${on ? 'bg-cyan-400' : 'bg-slate-600'}`}>
+      <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${on ? 'left-[22px]' : 'left-0.5'}`} />
+    </button>
+  );
+}
+
+function DatasetDialog({ mode, onClose }: { mode: 'export' | 'import'; onClose: () => void }) {
+  const exp = mode === 'export';
+  const [format, setFormat] = useState('');
+  const [images, setImages] = useState(false);
+  const [name, setName] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [defaults, setDefaults] = useState(true);
+  const valid = format && (exp || file);
+  const field = 'w-full rounded-lg border border-line bg-panel-3 px-3 py-2 text-sm outline-none focus:border-cyan-400';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="w-full max-w-xl rounded-2xl border border-line bg-[#0f1b3d] shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-line px-6 py-4">
+          <h2 className="font-semibold">{exp ? 'Export project as a dataset' : 'Import dataset to project'}</h2>
+          <button onClick={onClose} className="text-muted hover:text-white"><X className="h-5 w-5" /></button>
+        </div>
+        <div className="space-y-6 px-6 py-6">
+          <div>
+            <label className="mb-2 block text-sm font-semibold"><span className="text-red-500">*</span> {exp ? 'Export' : 'Import'} format</label>
+            <div className="relative">
+              <select value={format} onChange={(e) => setFormat(e.target.value)} className={`${field} appearance-none pr-9 ${format ? '' : 'text-muted'}`}>
+                <option value="" disabled>Select dataset format</option>
+                {FORMATS.map((f) => <option key={f} value={f} className="text-white">{f}</option>)}
+              </select>
+              <ChevronDown className="pointer-events-none absolute right-3 top-2.5 h-4 w-4 text-muted" />
+            </div>
+          </div>
+          {exp ? (
+            <>
+              <label className="flex items-center gap-3 text-sm font-semibold"><Toggle on={images} onChange={setImages} />Save images</label>
+              <div>
+                <label className="mb-2 block text-sm font-semibold">Custom name</label>
+                <div className="flex items-center gap-1 rounded-lg border border-line bg-panel-3 p-1 pr-3">
+                  <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Custom name for a dataset" className="flex-1 rounded-md bg-transparent px-2 py-1 text-sm outline-none" />
+                  <span className="text-sm text-muted">.zip</span>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div>
+              <label className="mb-2 block text-sm font-semibold"><span className="text-red-500">*</span> Dataset file</label>
+              <label className="flex cursor-pointer flex-col items-center gap-2 rounded-lg border border-dashed border-line bg-panel-3 px-4 py-6 text-sm text-muted hover:border-cyan-400">
+                <Upload className="h-5 w-5" />
+                {file ? <span className="text-white">{file.name}</span> : 'Click to select a .zip file'}
+                <input type="file" accept=".zip" className="hidden" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+              </label>
+            </div>
+          )}
+          <label className="flex items-center gap-3 text-sm font-semibold">
+            <Toggle on={defaults} onChange={setDefaults} />Use default settings
+            <HelpCircle className="h-4 w-4 text-muted" />
+          </label>
+        </div>
+        <div className="flex justify-end gap-3 border-t border-line px-6 py-4">
+          <button onClick={onClose} className="rounded-lg border border-line px-4 py-2 text-sm hover:bg-panel-3">Cancel</button>
+          <button onClick={onClose} disabled={!valid} className="rounded-lg bg-cyan-400 px-5 py-2 text-sm font-semibold text-slate-900 hover:bg-cyan-300 disabled:opacity-50">OK</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ActionsMenu({ onPick }: { onPick: (m: 'export' | 'import') => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const h = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+  const item = 'block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-panel-3';
+  const pick = (m: 'export' | 'import') => { setOpen(false); onPick(m); };
+  return (
+    <div ref={ref} className="relative ml-auto">
+      <button onClick={() => setOpen(!open)} className="flex items-center gap-2 rounded-xl border border-line px-4 py-1.5 text-sm hover:bg-panel-3">
+        Actions <MoreVertical className="h-4 w-4" />
+      </button>
+      {open && (
+        <div className="absolute right-0 z-40 mt-2 w-36 rounded-xl border border-line bg-[#0f1b3d] p-1.5 shadow-2xl">
+          <button className={item} onClick={() => pick('export')}>Export dataset</button>
+          <button className={item} onClick={() => pick('import')}>Import dataset</button>
+          <button className={item} onClick={() => setOpen(false)}>Backup Project</button>
+          <div className="my-1 border-t border-line" />
+          <button className={`${item} hover:text-red-400`} onClick={() => setOpen(false)}>Delete</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ProjectDetail() {
+  const [dialog, setDialog] = useState<'export' | 'import' | null>(null);
   const p = useProject();
   if (!p) return <Empty text="Project not found" />;
   const pt = tasks.filter((t) => t.projectId === p.id);
@@ -74,13 +177,14 @@ export default function ProjectDetail() {
         <Eye className="h-4 w-4 text-muted" />
         <span className="h-2.5 w-2.5 rounded-full bg-cyan-400" />
         <h1 className="text-lg font-semibold">Overview</h1>
-        <button className="btn-ghost ml-auto text-sm">Actions <MoreVertical className="h-4 w-4" /></button>
+        <ActionsMenu onPick={setDialog} />
       </div>
+      {dialog && <DatasetDialog key={dialog} mode={dialog} onClose={() => setDialog(null)} />}
 
       <div className="grid gap-5 lg:grid-cols-2">
         <Card
           title="Images / Dataset Overview"
-          action={<div className="flex gap-2"><button className="btn-ghost text-xs">Export</button><button className="btn-ghost text-xs">Import</button></div>}
+          action={<div className="flex gap-2"><button className="btn-ghost text-xs" onClick={() => setDialog('export')}>Export</button><button className="btn-ghost text-xs" onClick={() => setDialog('import')}>Import</button></div>}
         >
           <div className="flex flex-wrap items-center gap-10 pb-6">
             <Donut value={total ? annotated / total : 0} />

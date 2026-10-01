@@ -19,7 +19,7 @@ const projectNav = [
 ];
 
 const item = (active: boolean) =>
-  `flex h-14 shrink-0 items-center rounded-xl px-6 text-[15px] [@media(max-height:860px)]:h-11 font-semibold transition ${
+  `flex h-14 shrink-0 items-center rounded-xl px-6 text-[15px] font-semibold transition ${
     active ? 'bg-brand-500 text-[#04121c]' : 'bg-panel-2 text-muted hover:text-ink'
   }`;
 
@@ -36,19 +36,19 @@ export default function Layout() {
   return (
     <div className={`flex gap-4 p-3 xl:gap-6 xl:p-5 ${workspace ? 'h-screen' : 'min-h-screen'}`}>
       <aside className="sticky top-3 flex h-[calc(100vh-1.5rem)] w-60 shrink-0 flex-col rounded-2xl border border-line bg-panel px-4 py-5 xl:top-5 xl:h-[calc(100vh-2.5rem)] xl:w-72 xl:px-6">
-        <div className="mb-8 mt-1 [@media(max-height:860px)]:mb-5"><Logo /></div>
-        <nav className="space-y-3 [@media(max-height:860px)]:space-y-2">
+        <div className="mb-8 mt-1"><Logo /></div>
+        <nav className="space-y-3">
           {globalNav.map(({ name, to, icon: Icon, end }) => (
             <NavLink key={to} to={to} end={end} className={({ isActive }) => item(isActive)}>
-              <Icon className="h-5 w-5" />
-              <span className="flex-1 text-center">{name}</span>
+              <Icon className="h-5 w-5 shrink-0" />
+              <span className="ml-12">{name}</span>
             </NavLink>
           ))}
         </nav>
         {project && (
           <>
-            <hr className="mx-6 my-5 border-line [@media(max-height:860px)]:my-3" />
-            <nav className="no-scrollbar min-h-0 space-y-3 overflow-y-auto [@media(max-height:860px)]:space-y-2">
+            <hr className="mx-6 my-5 border-line" />
+            <nav className="no-scrollbar min-h-0 space-y-3 overflow-y-auto">
               {projectNav.map(([name, path]) => (
                 <NavLink key={path} to={`/projects/${project.params.id}/${path}`} className={({ isActive }) => item(isActive)}>
                   {name}
@@ -57,6 +57,10 @@ export default function Layout() {
             </nav>
           </>
         )}
+        <button className="mt-auto flex shrink-0 items-center justify-center gap-4 pt-5 text-[15px] font-semibold text-ink">
+          <Settings className="h-5 w-5" />
+          Settings
+        </button>
       </aside>
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 xl:gap-6">
