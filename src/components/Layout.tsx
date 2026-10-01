@@ -26,7 +26,9 @@ const item = (active: boolean) =>
 export default function Layout() {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
-  const project = useMatch('/projects/:id/*');
+  const projectMatch = useMatch('/projects/:id/*');
+  // Project tabs only apply inside an existing project, not on /projects/create
+  const project = projectMatch && projectMatch.params.id !== 'create' ? projectMatch : null;
   const isHome = useMatch('/projects') !== null;
 
   return (

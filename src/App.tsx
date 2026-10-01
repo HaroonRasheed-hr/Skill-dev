@@ -3,6 +3,7 @@ import Layout from './components/Layout';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Projects from './pages/Projects';
+import CreateProject from './pages/CreateProject';
 import ProjectDetail from './pages/ProjectDetail';
 import ProjectLabels from './pages/ProjectLabels';
 import ProjectAnnotation from './pages/ProjectAnnotation';
@@ -25,6 +26,7 @@ export default function App() {
       <Route path="/tasks/:taskId/jobs/:jobId" element={<Annotation />} />
       <Route element={<Layout />}>
         <Route path="/projects" element={<Projects />} />
+        <Route path="/projects/create" element={<CreateProject />} />
         <Route path="/projects/:id" element={<Navigate to="overview" replace />} />
         <Route path="/projects/:id/overview" element={<ProjectDetail />} />
         <Route path="/projects/:id/label" element={<ProjectLabels />} />
