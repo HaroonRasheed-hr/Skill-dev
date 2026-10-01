@@ -1,5 +1,5 @@
-import { NavLink, Outlet, useMatch, useNavigate } from 'react-router-dom';
-import { Bell, FileText, Search, Settings, User, Users } from 'lucide-react';
+import { NavLink, Outlet, useMatch, useNavigate, useOutletContext } from 'react-router-dom';
+import { ArrowLeft, Bell, FileText, Search, Settings, User, Users } from 'lucide-react';
 import { useState } from 'react';
 import Logo from './Logo';
 
@@ -25,6 +25,7 @@ const item = (active: boolean) =>
 
 export default function Layout() {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
   const navigate = useNavigate();
   const projectMatch = useMatch('/projects/:id/*');
   // Project tabs only apply inside an existing project, not on /projects/create
@@ -66,13 +67,13 @@ export default function Layout() {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4 xl:gap-6">
         <header className="flex shrink-0 gap-4 xl:gap-6">
           {!isHome && (
-            <button onClick={() => navigate(-1)} className="flex h-12 items-center gap-3 rounded-xl border border-line bg-panel-2 px-5 font-semibold xl:h-14">
-              Back
+            <button onClick={() => navigate(-1)} className="flex h-12 items-center gap-3 rounded-2xl bg-[#0f1f45] px-6 font-bold text-white transition hover:bg-[#152a5c] xl:h-14">
+              <ArrowLeft className="h-5 w-5" /> Back
             </button>
           )}
           <div className="flex h-12 flex-1 items-center gap-3 xl:h-14 rounded-xl border border-line bg-panel-2 px-5">
             <Search className="h-5 w-5 text-muted" />
-            <input className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted" placeholder="Search projects, tasks..." />
+            <input className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted" placeholder="Search projects, tasks..." value={search} onChange={(e) => setSearch(e.target.value)} />
             <div className="relative">
               <button onClick={() => setOpen(!open)} className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-brand-500 to-indigo-500">
                 <User className="h-5 w-5 text-white" />
@@ -88,9 +89,11 @@ export default function Layout() {
           </div>
         </header>
         <main className={`min-h-0 flex-1 rounded-2xl border border-line bg-panel ${workspace ? 'p-2 xl:p-3' : 'p-6 xl:p-10'}`}>
-          <Outlet />
+          <Outlet context={{ search }} />
         </main>
       </div>
     </div>
   );
 }
+
+export const useHeaderSearch = () => useOutletContext<{ search: string } | undefined>()?.search ?? '';
