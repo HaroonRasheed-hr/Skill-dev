@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronRight, MoreVertical, Pencil, Plus, Tag, Trash2 } from 'lucide-react';
+import { ChevronRight, MoreVertical, Pencil, Tag, Trash2 } from 'lucide-react';
 import { Empty } from '../components/ui';
 import { jobs, tasks } from '../data/mock';
 import { useProject } from './ProjectDetail';
@@ -89,7 +89,7 @@ export default function ProjectLabels() {
             <input className="input flex-1" placeholder="Label name" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} />
             <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="h-10 w-14 cursor-pointer rounded-lg border bg-panel-2" />
             <select className="input w-44"><option>Any shape</option><option>Rectangle</option><option>Polygon</option><option>Points</option><option>Skeleton</option></select>
-            <button className="btn-primary whitespace-nowrap" onClick={add}><Plus className="h-4 w-4" />Add label</button>
+            <button className="btn-primary whitespace-nowrap" onClick={add}>Add label</button>
           </div>
           {list.length === 0 ? (
             <p className="py-6 text-center text-muted">No labels yet</p>

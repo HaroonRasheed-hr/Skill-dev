@@ -86,8 +86,8 @@ export default function Annotation() {
     <div className="flex h-screen flex-col bg-panel">
       {/* Top bar */}
       <header className="flex h-12 items-center gap-2 bg-gray-900 px-3 text-gray-200">
-        <Link to={`/tasks/${taskId}`} className="flex items-center gap-1 rounded px-2 py-1 text-sm hover:bg-gray-800"><Menu className="h-4 w-4" />Menu</Link>
-        <button onClick={() => setSaved(true)} className="flex items-center gap-1 rounded px-2 py-1 text-sm hover:bg-gray-800"><Save className="h-4 w-4" />{saved ? 'Saved' : 'Save'}</button>
+        <Link to={`/tasks/${taskId}`} className="flex items-center gap-1 rounded px-2 py-1 text-sm hover:bg-gray-800">Menu</Link>
+        <button onClick={() => setSaved(true)} className="flex items-center gap-1 rounded px-2 py-1 text-sm hover:bg-gray-800">{saved ? 'Saved' : 'Save'}</button>
         <button onClick={undo} disabled={!history.length} className="rounded p-1.5 hover:bg-gray-800 disabled:opacity-30" title="Undo"><Undo2 className="h-4 w-4" /></button>
         <button onClick={redo} disabled={!future.length} className="rounded p-1.5 hover:bg-gray-800 disabled:opacity-30" title="Redo"><Redo2 className="h-4 w-4" /></button>
 

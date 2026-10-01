@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Dumbbell, Play, Square } from 'lucide-react';
+import { Dumbbell } from 'lucide-react';
 import { Badge, PageHeader, Progress } from '../components/ui';
 import { models, projects, trainingRuns } from '../data/mock';
 
@@ -28,7 +28,7 @@ export default function Training() {
           </div>
           <div><label className="label">Train / val split</label><input type="range" className="w-full accent-brand-500" defaultValue={80} /></div>
           <div><label className="label">GPU</label><select className="input"><option>NVIDIA A100 (1x)</option><option>NVIDIA T4 (1x)</option></select></div>
-          <button className="btn-primary w-full justify-center"><Play className="h-4 w-4" />Start training</button>
+          <button className="btn-primary w-full justify-center">Start training</button>
         </form>
 
         <div className="space-y-5 lg:col-span-2">
@@ -50,7 +50,7 @@ export default function Training() {
           <div className="card p-5">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="font-semibold">{run.id} · {run.model}</h2>
-              {run.status === 'running' && <button className="btn-ghost text-red-600"><Square className="h-4 w-4" />Stop</button>}
+              {run.status === 'running' && <button className="btn-ghost text-red-600">Stop</button>}
             </div>
             <div className="mb-4 grid grid-cols-3 gap-3">
               {[['Epoch', `${run.epoch}/${run.epochs}`], ['Loss', run.loss], ['mAP@50', run.map]].map(([k, v]) => (

@@ -21,7 +21,7 @@ export default function Tasks() {
             <select className="input w-40" value={status} onChange={(e) => setStatus(e.target.value)}>
               <option value="all">All statuses</option><option value="annotation">Annotation</option><option value="validation">Validation</option><option value="completed">Completed</option>
             </select>
-            <Link to="/tasks/create" className="btn-primary whitespace-nowrap"><Plus className="h-4 w-4" />Create task</Link>
+            <Link to="/tasks/create" className="btn-primary whitespace-nowrap">Create task</Link>
           </>
         }
       />

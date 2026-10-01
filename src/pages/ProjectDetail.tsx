@@ -1,5 +1,5 @@
 import { Link, useParams } from 'react-router-dom';
-import { Calendar, ChevronRight, Clock, Download, Eye, Image, MoreVertical, Tag, Upload } from 'lucide-react';
+import { Calendar, ChevronRight, Clock, Eye, Image, MoreVertical, Tag } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Empty } from '../components/ui';
 import { projects, tasks } from '../data/mock';
@@ -80,7 +80,7 @@ export default function ProjectDetail() {
       <div className="grid gap-5 lg:grid-cols-2">
         <Card
           title="Images / Dataset Overview"
-          action={<div className="flex gap-2"><button className="btn-ghost text-xs"><Download className="h-3.5 w-3.5" />Export</button><button className="btn-ghost text-xs"><Upload className="h-3.5 w-3.5" />Import</button></div>}
+          action={<div className="flex gap-2"><button className="btn-ghost text-xs">Export</button><button className="btn-ghost text-xs">Import</button></div>}
         >
           <div className="flex flex-wrap items-center gap-10 pb-6">
             <Donut value={total ? annotated / total : 0} />

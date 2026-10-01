@@ -19,7 +19,7 @@ export default function Testing() {
           <div><label className="label">Test set (task)</label><select className="input">{tasks.map((t) => <option key={t.id}>{t.name}</option>)}</select></div>
           <div><label className="label">Confidence threshold</label><input className="input" defaultValue="0.25" /></div>
           <div><label className="label">IoU threshold</label><input className="input" defaultValue="0.5" /></div>
-          <button className="btn-primary w-full justify-center"><FlaskConical className="h-4 w-4" />Run evaluation</button>
+          <button className="btn-primary w-full justify-center">Run evaluation</button>
         </form>
 
         <div className="space-y-5 lg:col-span-2">

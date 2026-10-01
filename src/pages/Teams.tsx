@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Building2, ChevronDown, ChevronRight, Pencil, Plus, Trash2, Users } from 'lucide-react';
+import { Building2, ChevronDown, Pencil, Trash2, Users } from 'lucide-react';
 import { Modal, PageHeader } from '../components/ui';
 
 type Role = 'Admin' | 'Maintainer' | 'Reviewer' | 'Annotator';
@@ -113,7 +113,7 @@ export default function Teams() {
                     Active users: <span className="font-semibold text-ink">{activeCount}</span>
                   </div>
                   <button className="btn-primary py-3" onClick={() => setShowInvite(true)}>
-                    <Plus className="h-4 w-4" />Invite users<ChevronRight className="ml-2 h-4 w-4 border-l border-black/20 pl-1" />
+                    Invite users
                   </button>
                 </div>
               </div>
@@ -157,7 +157,7 @@ export default function Teams() {
           <>
             <div className="mb-8 flex items-center justify-between gap-4">
               <h2 className="text-xl font-semibold">Organization</h2>
-              <button className="btn-primary py-3" onClick={() => setShowCreateOrg(true)}><Plus className="h-4 w-4" />Create organization</button>
+              <button className="btn-primary py-3" onClick={() => setShowCreateOrg(true)}>Create organization</button>
             </div>
             {orgs.length === 0 ? (
               <NoOrg onCreate={() => setShowCreateOrg(true)} />
@@ -198,7 +198,7 @@ function NoOrg({ onCreate }: { onCreate: () => void }) {
       <Building2 className="mx-auto mb-4 h-10 w-10 text-muted" />
       <p className="font-semibold">No organization yet</p>
       <p className="mb-6 mt-1 text-sm text-muted">Create an organization first, then invite users to it.</p>
-      <button className="btn-primary" onClick={onCreate}><Plus className="h-4 w-4" />Create organization</button>
+      <button className="btn-primary" onClick={onCreate}>Create organization</button>
     </div>
   );
 }
@@ -281,7 +281,7 @@ function EditMemberModal({ member, onClose, onSave, onRemove }: { member: Member
           </select>
         </label>
         <div className="flex justify-between gap-2">
-          <button className="btn-ghost hover:!border-red-400 hover:!text-red-400" onClick={() => onRemove(member.id)}><Trash2 className="h-4 w-4" />Remove</button>
+          <button className="btn-ghost hover:!border-red-400 hover:!text-red-400" onClick={() => onRemove(member.id)}>Remove</button>
           <div className="flex gap-2">
             <button className="btn-ghost" onClick={onClose}>Cancel</button>
             <button className="btn-primary" disabled={!draft.name.trim()} onClick={() => onSave({ ...draft, name: draft.name.trim() })}>Save</button>

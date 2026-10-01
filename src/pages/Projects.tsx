@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { MoreVertical, Plus } from 'lucide-react';
+import { MoreVertical } from 'lucide-react';
 import { PageHeader } from '../components/ui';
 import { projects, tasks } from '../data/mock';
 
@@ -11,7 +11,7 @@ export default function Projects() {
 
   return (
     <>
-      <PageHeader title="Projects" search={q} onSearch={setQ} actions={<button className="btn-primary" onClick={() => navigate('/projects/create')}><Plus className="h-4 w-4" />Create project</button>} />
+      <PageHeader title="Projects" search={q} onSearch={setQ} actions={<button className="btn-primary" onClick={() => navigate('/projects/create')}>Create project</button>} />
       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {list.map((p) => {
           const pt = tasks.filter((t) => t.projectId === p.id);

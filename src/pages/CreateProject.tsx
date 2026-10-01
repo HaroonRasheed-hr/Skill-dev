@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronRight, Plus, Eye, FileArchive, FilePlus2, Folder, FolderUp, LayoutGrid, PlusCircle, Tag, X } from 'lucide-react';
+import { ChevronRight, Plus, Eye, FileArchive, FilePlus2, Folder, LayoutGrid, PlusCircle, Tag, X } from 'lucide-react';
 import { projects, type Label } from '../data/mock';
 import { checkDataset, type DatasetEntry, type DatasetFormat } from '../lib/datasetFormat';
 
@@ -346,10 +346,10 @@ export default function CreateProject() {
               {datasetMenu && (
                 <div className="absolute top-[calc(100%-2.5rem)] z-10 w-52 overflow-hidden rounded-lg border border-line bg-panel-2 shadow-xl">
                   <button className="flex w-full items-center gap-2 px-4 py-2.5 text-sm hover:bg-panel-3" onClick={() => { setDatasetMenu(false); zipInput.current?.click(); }}>
-                    <FileArchive className="h-4 w-4 text-brand-500" />Upload ZIP file
+                    Upload ZIP file
                   </button>
                   <button className="flex w-full items-center gap-2 px-4 py-2.5 text-sm hover:bg-panel-3" onClick={() => { setDatasetMenu(false); folderInput.current?.click(); }}>
-                    <FolderUp className="h-4 w-4 text-brand-500" />Upload folder
+                    Upload folder
                   </button>
                 </div>
               )}
@@ -476,7 +476,7 @@ export default function CreateProject() {
             </div>
             <div className="mt-5 mb-6 flex items-center justify-between gap-4">
               <p className="text-muted">Click an image to set as thumbnail.</p>
-              <button onClick={() => mediaInput.current?.click()} className="btn border border-brand-500/50 bg-brand-50/60 text-brand-500 hover:border-brand-500"><Plus className="h-4 w-4" />Add more</button>
+              <button onClick={() => mediaInput.current?.click()} className="btn border border-brand-500/50 bg-brand-50/60 text-brand-500 hover:border-brand-500">Add more</button>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto pr-2">
               <div className="grid grid-cols-2 gap-5 sm:grid-cols-3 md:grid-cols-5">
