@@ -32,6 +32,7 @@ THIRD_PARTY_APPS = [
 LOCAL_APPS = [
     "apps.accounts",
     "apps.projects",
+    "apps.training",
 ]
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
@@ -100,6 +101,17 @@ DATASET_LIMITS = {
     "MAX_UNCOMPRESSED_BYTES": env.int("DATASET_MAX_UNCOMPRESSED_MB", default=2048) * 1024 * 1024,
     "MAX_FILES": env.int("DATASET_MAX_FILES", default=20000),
     "MAX_COMPRESSION_RATIO": 200,
+}
+
+# Model training (MMDetection, CPU only). Run the worker with `python manage.py training_worker`.
+TRAINING = {
+    "ROOT": Path(env("TRAINING_ROOT", default=str(BASE_DIR / "training_runs"))),
+    "DEFAULT_EPOCHS": env.int("TRAINING_DEFAULT_EPOCHS", default=12),
+    "MAX_EPOCHS": env.int("TRAINING_MAX_EPOCHS", default=100),
+    # 0 = use every CPU core.
+    "CPU_THREADS": env.int("TRAINING_CPU_THREADS", default=0),
+    "POLL_SECONDS": env.float("TRAINING_POLL_SECONDS", default=5.0),
+    "PROGRESS_SECONDS": env.float("TRAINING_PROGRESS_SECONDS", default=3.0),
 }
 
 # Production build of the React app (`npm run build` in frontend/).

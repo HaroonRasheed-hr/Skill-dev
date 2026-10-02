@@ -116,3 +116,29 @@ export function useProject(): Project | null | undefined {
   }, [id]);
   return state.id === id ? state.p : cache.get(id);
 }
+
+// --- Training ---
+
+export type ApiTrainingJob = {
+  id: number; name: string; architecture: string; architecture_label: string; train_split: number;
+  epochs: number; batch_size: number; use_pretrained: boolean;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'; cancel_requested: boolean;
+  progress: number; current_epoch: number; train_images: number; val_images: number; class_names: string[];
+  metrics: Record<string, number>; history: Record<string, number | null>[]; error: string;
+  has_checkpoint: boolean; created_at: string; started_at: string | null; finished_at: string | null;
+};
+export type ApiTrainingSummary = {
+  total_images: number; annotated_images: number; remaining_images: number; annotated_percent: number;
+  usable_images: number; split: number; train_images: number; val_images: number;
+  classes: { id: number; name: string; color: string; annotation_count: number; image_count: number }[];
+  architectures: { value: string; label: string }[]; default_epochs: number; max_epochs: number;
+  active_job: ApiTrainingJob | null;
+};
+
+/** Same rule as the backend: training keeps >= 1 image, validation >= 1 when there are 2+. */
+export function splitCounts(n: number, split: number): [number, number] {
+  if (n <= 0) return [0, 0];
+  if (n === 1) return [1, 0];
+  const train = Math.min(Math.max(Math.round((n * split) / 100), 1), n - 1);
+  return [train, n - train];
+}

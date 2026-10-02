@@ -1,17 +1,12 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ChevronRight, Zap } from 'lucide-react';
 import { Empty, Modal } from '../components/ui';
-import { jobs, tasks } from '../data/mock';
 import { useProject } from './ProjectDetail';
 import { usePersistentState } from '../lib/persist';
+import { api, ApiError, splitCounts, type ApiTrainingJob, type ApiTrainingSummary } from '../lib/api';
 
 const SPLIT_PRESETS = [60, 70, 80, 90];
-
-// "0-149" -> 150
-const rangeSize = (r: string) => {
-  const [a, b] = r.split('-').map(Number);
-  return b - a + 1;
-};
+const POLL_MS = 4000;
 
 function BatchCard({ title, pct, caption }: { title: string; pct: number; caption: string }) {
   return (
@@ -47,19 +42,72 @@ export default function Training() {
   const key = `training:${p?.id}`;
   const [modelName, setModelName] = usePersistentState(`${key}:model`, '');
   const [split, setSplit] = usePersistentState(`${key}:split`, 70);
-  const [started, setStarted] = usePersistentState<string | null>(`${key}:started`, null);
-  if (!p) return <Empty text={p === undefined ? 'Loading…' : 'Project not found'} />;
+  const [architecture, setArchitecture] = usePersistentState(`${key}:arch`, 'rtmdet_tiny');
+  const [epochs, setEpochs] = usePersistentState<number | ''>(`${key}:epochs`, '');
+  const [summary, setSummary] = useState<ApiTrainingSummary | null>(null);
+  const [job, setJob] = useState<ApiTrainingJob | null>(null);
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const projectId = p?.id;
+  const jobId = job?.id;
 
-  const pt = tasks.filter((t) => t.projectId === p.id);
-  const total = pt.reduce((s, t) => s + t.frames, 0);
-  const annotated = jobs
-    .filter((j) => j.state === 'completed' && pt.some((t) => t.id === j.taskId))
-    .reduce((s, j) => s + rangeSize(j.frames), 0);
+  // Annotation counts come from the images saved on the Annotation page.
+  const load = useCallback(async () => {
+    if (!projectId) return;
+    const s = await api<ApiTrainingSummary>(`/projects/${projectId}/training/summary/`);
+    setSummary(s);
+    if (s.active_job) setJob(s.active_job);
+    else {
+      const [latest] = await api<ApiTrainingJob[]>(`/projects/${projectId}/training/jobs/`);
+      setJob(latest ?? null);
+    }
+  }, [projectId]);
+
+  useEffect(() => { load().catch((e) => setError(e instanceof Error ? e.message : String(e))); }, [load]);
+
+  // While a job is queued or running, poll it for progress.
+  const active = job?.status === 'queued' || job?.status === 'running';
+  useEffect(() => {
+    if (!active || !projectId || !jobId) return;
+    const t = setInterval(() => {
+      api<ApiTrainingJob>(`/projects/${projectId}/training/jobs/${jobId}/`).then(setJob).catch(() => {});
+    }, POLL_MS);
+    return () => clearInterval(t);
+  }, [active, projectId, jobId]);
+
+  if (!p) return <Empty text={p === undefined ? 'Loading…' : 'Project not found'} />;
+  if (!summary) return <Empty text={error || 'Loading…'} />;
+
+  const total = summary.total_images;
+  const annotated = summary.annotated_images;
+  const usable = summary.usable_images;
   const annotatedPct = total ? Math.round((annotated / total) * 100) : 0;
-  const trainCount = Math.round((annotated * split) / 100);
-  const valCount = annotated - trainCount;
+  const [trainCount, valCount] = splitCounts(usable, split);
   const pctOf = (n: number) => (total ? Math.round((n / total) * 100) : 0);
-  const classes = p.labels?.length ?? 0;
+  const classes = summary.classes.length;
+
+  const startTraining = async () => {
+    setSubmitting(true);
+    setError('');
+    try {
+      const created = await api<ApiTrainingJob>(`/projects/${p.id}/training/jobs/`, {
+        method: 'POST',
+        json: { name: modelName.trim(), architecture, train_split: split, ...(epochs ? { epochs } : {}) },
+      });
+      setJob(created);
+      setConfiguring(false);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Could not start training.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const cancelTraining = async () => {
+    if (!job) return;
+    try { setJob(await api<ApiTrainingJob>(`/projects/${p.id}/training/jobs/${job.id}/cancel/`, { method: 'POST' })); }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+  };
 
   // Donut ring
   const r = 52;
@@ -73,8 +121,9 @@ export default function Training() {
         </span>
         <h1 className="text-xl font-semibold">Train</h1>
         <button
-          disabled={annotated === 0}
-          onClick={() => setConfiguring(true)}
+          disabled={usable === 0 || active}
+          title={usable === 0 ? 'Annotate some images with boxes or polygons first' : active ? 'A training job is already running' : undefined}
+          onClick={() => { setError(''); setConfiguring(true); }}
           className="ml-auto flex items-center rounded-xl bg-brand-500 px-4 py-4 font-semibold text-slate-900 hover:bg-brand-500/90 disabled:cursor-not-allowed"
         >
           Start Training
@@ -82,9 +131,31 @@ export default function Training() {
         </button>
       </div>
 
-      {started && (
+      {error && !configuring && (
+        <div className="mb-6 rounded-xl border border-red-500/40 bg-red-500/10 px-5 py-3 text-sm">{error}</div>
+      )}
+
+      {job && (
         <div className="mb-6 rounded-xl border border-brand-500/40 bg-brand-500/10 px-5 py-3 text-sm">
-          Training started for <span className="font-semibold">{started}</span> — {trainCount} images for training, {valCount} for testing.
+          <div className="flex items-center gap-3">
+            <span>
+              <span className="font-semibold">{job.name}</span> · {job.architecture_label} ·{' '}
+              <span className="capitalize">{job.cancel_requested && active ? 'cancelling' : job.status}</span>
+              {job.status === 'running' && <> — epoch {job.current_epoch}/{job.epochs}, {Math.round(job.progress)}%</>}
+              {job.status === 'queued' && <> — waiting for the training worker</>}
+              {job.status === 'completed' && job.metrics.bbox_mAP !== undefined && <> — mAP {job.metrics.bbox_mAP.toFixed(3)}</>}
+            </span>
+            {active && !job.cancel_requested && (
+              <button className="ml-auto text-brand-500 underline hover:text-brand-500/80" onClick={cancelTraining}>Cancel</button>
+            )}
+          </div>
+          {active && (
+            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-page">
+              <div className="h-full bg-brand-500 transition-all" style={{ width: `${job.progress}%` }} />
+            </div>
+          )}
+          {job.status === 'failed' && <p className="mt-1 text-red-400">{job.error}</p>}
+          {job.train_images > 0 && <p className="mt-1 text-muted">{job.train_images} images for training, {job.val_images} for testing.</p>}
         </div>
       )}
 
@@ -164,8 +235,7 @@ export default function Training() {
             className="space-y-5"
             onSubmit={(e) => {
               e.preventDefault();
-              setStarted(modelName.trim());
-              setConfiguring(false);
+              startTraining();
             }}
           >
             <label className="block space-y-1.5">
@@ -204,15 +274,35 @@ export default function Training() {
               </div>
             </div>
 
+            <label className="block space-y-1.5">
+              <span className="text-sm font-medium">Model architecture</span>
+              <select className="input" value={architecture} onChange={(e) => setArchitecture(e.target.value)}>
+                {summary.architectures.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
+              </select>
+            </label>
+
+            <label className="block space-y-1.5">
+              <span className="text-sm font-medium">Epochs</span>
+              <input
+                type="number" min={1} max={summary.max_epochs} className="input"
+                placeholder={`${summary.default_epochs} (default)`}
+                value={epochs}
+                onChange={(e) => setEpochs(e.target.value ? Number(e.target.value) : '')}
+              />
+            </label>
+
             <div className="grid grid-cols-2 gap-3 text-center text-sm">
               <div className="rounded-lg bg-panel-3 py-3"><p className="text-2xl font-bold">{trainCount}</p>Training images</div>
               <div className="rounded-lg bg-brand-500/15 py-3"><p className="text-2xl font-bold">{valCount}</p>Testing images</div>
             </div>
-            <p className="text-xs text-muted">Out of {annotated} annotated images.</p>
+            <p className="text-xs text-muted">
+              Out of {usable} images annotated with boxes or polygons. Training runs on the CPU, so it can take a while.
+            </p>
+            {error && <p className="text-sm text-red-400">{error}</p>}
 
             <div className="flex justify-end gap-2">
               <button type="button" className="btn-ghost" onClick={() => setConfiguring(false)}>Cancel</button>
-              <button type="submit" className="btn-primary" disabled={!modelName.trim()}>Start Training</button>
+              <button type="submit" className="btn-primary" disabled={!modelName.trim() || submitting}>{submitting ? 'Starting…' : 'Start Training'}</button>
             </div>
           </form>
         </Modal>

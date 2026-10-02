@@ -8,6 +8,7 @@ from config.views import spa_index
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/v1/auth/", include("apps.accounts.urls")),
+    path("api/v1/projects/<int:project_id>/training/", include("apps.training.urls")),
     path("api/v1/projects/", include("apps.projects.urls")),
 ]
 # Uploaded media is served by Django only in development.
