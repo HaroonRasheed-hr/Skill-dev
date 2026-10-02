@@ -1,9 +1,12 @@
 import { useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, Zap } from 'lucide-react';
 import { models } from '../data/mock';
+import { usePersistentState } from '../lib/persist';
+import { useParams } from 'react-router-dom';
 
 export default function Testing() {
-  const [modelId, setModelId] = useState('');
+  const { id } = useParams();
+  const [modelId, setModelId] = usePersistentState(`testing:${id}:model`, '');
   const [open, setOpen] = useState(false);
   const [image, setImage] = useState<string | null>(null);
   const [output, setOutput] = useState<string | null>(null);

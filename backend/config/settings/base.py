@@ -31,6 +31,7 @@ THIRD_PARTY_APPS = [
 ]
 LOCAL_APPS = [
     "apps.accounts",
+    "apps.projects",
 ]
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
@@ -88,6 +89,18 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# User uploads (dataset images). In production, point this at persistent storage.
+MEDIA_URL = "media/"
+MEDIA_ROOT = Path(env("MEDIA_ROOT", default=str(BASE_DIR / "media")))
+
+# Guards for uploaded dataset ZIPs (size, file count, zip-bomb protection).
+DATASET_LIMITS = {
+    "MAX_ARCHIVE_BYTES": env.int("DATASET_MAX_ARCHIVE_MB", default=500) * 1024 * 1024,
+    "MAX_UNCOMPRESSED_BYTES": env.int("DATASET_MAX_UNCOMPRESSED_MB", default=2048) * 1024 * 1024,
+    "MAX_FILES": env.int("DATASET_MAX_FILES", default=20000),
+    "MAX_COMPRESSION_RATIO": 200,
+}
 
 # Production build of the React app (`npm run build` in frontend/).
 # WhiteNoise serves its files from the site root; the SPA catch-all serves index.html.

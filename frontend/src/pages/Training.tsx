@@ -3,6 +3,7 @@ import { ChevronRight, Zap } from 'lucide-react';
 import { Empty, Modal } from '../components/ui';
 import { jobs, tasks } from '../data/mock';
 import { useProject } from './ProjectDetail';
+import { usePersistentState } from '../lib/persist';
 
 const SPLIT_PRESETS = [60, 70, 80, 90];
 
@@ -43,10 +44,11 @@ export default function Training() {
   const p = useProject();
   const [expanded, setExpanded] = useState(false);
   const [configuring, setConfiguring] = useState(false);
-  const [modelName, setModelName] = useState('');
-  const [split, setSplit] = useState(70);
-  const [started, setStarted] = useState<string | null>(null);
-  if (!p) return <Empty text="Project not found" />;
+  const key = `training:${p?.id}`;
+  const [modelName, setModelName] = usePersistentState(`${key}:model`, '');
+  const [split, setSplit] = usePersistentState(`${key}:split`, 70);
+  const [started, setStarted] = usePersistentState<string | null>(`${key}:started`, null);
+  if (!p) return <Empty text={p === undefined ? 'Loading…' : 'Project not found'} />;
 
   const pt = tasks.filter((t) => t.projectId === p.id);
   const total = pt.reduce((s, t) => s + t.frames, 0);

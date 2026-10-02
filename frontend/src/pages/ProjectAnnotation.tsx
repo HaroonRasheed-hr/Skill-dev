@@ -6,13 +6,21 @@ import {
 } from 'lucide-react';
 import { Empty } from '../components/ui';
 import { useProject } from './ProjectDetail';
+import { usePersistentState } from '../lib/persist';
+import { api, fetchImages, type ApiAnnotation, type ApiImage } from '../lib/api';
 
 type Kind = 'rect' | 'polygon' | 'polyline' | 'points' | 'ellipse';
 type Tool = 'pan' | 'select' | 'ai' | Kind;
 type Pt = { x: number; y: number };
-type Shape = { id: number; image: number; kind: Kind; label: string; pts: Pt[]; hidden: boolean; locked: boolean };
+// dbId: the saved annotation's id in the backend, so saving updates it instead of re-creating it
+type Shape = { id: number; image: number; kind: Kind; label: string; pts: Pt[]; hidden: boolean; locked: boolean; dbId?: number };
 
 const W = 1000, H = 625;
+// The image is letterboxed (object-contain) inside the W×H canvas: scale + offset between the two spaces
+const fit = (img: ApiImage) => {
+  const k = Math.min(W / img.width, H / img.height);
+  return { k, ox: (W - img.width * k) / 2, oy: (H - img.height * k) / 2 };
+};
 const demo = (id: number) => Array.from({ length: 6 }, (_, i) => `https://picsum.photos/seed/p${id}-${i}/1000/625`);
 
 // Hover card for each rail tool: what it does and its shortcut
@@ -68,13 +76,15 @@ function BarBtn({ icon: Icon, text, onClick, disabled }: { icon: typeof Square; 
 
 export default function ProjectAnnotation() {
   const p = useProject();
-  const images = p?.media?.length ? p.media : demo(p?.id ?? 0);
+  const [stored, setStored] = useState<ApiImage[] | null>(null);
+  const images = stored?.length ? stored.map((i) => i.url) : p?.media?.length ? p.media : demo(p?.id ?? 0);
   const labels = p?.labels.length ? p.labels : [{ name: 'object', color: '#00c2f0' }];
 
-  const [index, setIndex] = useState(0);
-  const [tool, setTool] = useState<Tool>('rect');
-  const [label, setLabel] = useState(labels[0].name);
-  const [shapes, setShapes] = useState<Shape[]>([]);
+  const key = `project-annotation:${p?.id}`;
+  const [index, setIndex] = usePersistentState(`${key}:index`, 0);
+  const [tool, setTool] = usePersistentState<Tool>(`${key}:tool`, 'rect');
+  const [label, setLabel] = usePersistentState(`${key}:label`, labels[0].name);
+  const [shapes, setShapes] = usePersistentState<Shape[]>(`${key}:shapes`, []);
   const [history, setHistory] = useState<Shape[][]>([]);
   const [future, setFuture] = useState<Shape[][]>([]);
   const [active, setActive] = useState<number | null>(null);
@@ -87,18 +97,96 @@ export default function ProjectAnnotation() {
   const canvasRef = useRef<HTMLElement>(null);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState<Pt>({ x: 0, y: 0 });
-  const [tab, setTab] = useState<'objects' | 'labels' | 'issues'>('objects');
-  const [sort, setSort] = useState<'asc' | 'desc' | 'label'>('asc');
-  const [autosave, setAutosave] = useState(false);
+  const [tab, setTab] = usePersistentState<'objects' | 'labels' | 'issues'>(`${key}:tab`, 'objects');
+  const [sort, setSort] = usePersistentState<'asc' | 'desc' | 'label'>(`${key}:sort`, 'asc');
+  const [autosave, setAutosave] = usePersistentState(`${key}:autosave`, false);
   const [saved, setSaved] = useState(true);
-  const [opacity, setOpacity] = useState(30);
-  const [brightness, setBrightness] = useState(100);
+  const [opacity, setOpacity] = usePersistentState(`${key}:opacity`, 30);
+  const [brightness, setBrightness] = usePersistentState(`${key}:brightness`, 100);
   const [showAppearance, setShowAppearance] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [showPanel, setShowPanel] = useState(true);
+  const [showPanel, setShowPanel] = usePersistentState(`${key}:showPanel`, true);
   const svgRef = useRef<SVGSVGElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const drag = useRef<{ start: Pt; pan: Pt } | null>(null);
+  // Last saved payload per image, to only send images that changed
+  const savedPayload = useRef(new Map<number, string>());
+  const [saveError, setSaveError] = useState('');
+
+  // Load the project's images and saved annotations from the backend (points are image pixels)
+  const projectId = p?.id;
+  const projectLabels = p?.labels;
+  useEffect(() => {
+    if (!projectId || !projectLabels) return;
+    let live = true;
+    fetchImages(projectId).then((imgs) => {
+      if (!live) return;
+      const names = new Map(projectLabels.map((l) => [l.id, l.name]));
+      let id = 0;
+      const loaded = imgs.flatMap((img, i) => {
+        const { k, ox, oy } = fit(img);
+        return img.annotations.map((a): Shape => ({
+          id: ++id, image: i, kind: a.kind as Kind, label: names.get(a.label) ?? '', hidden: false, locked: false, dbId: a.id,
+          pts: a.points.map(([x, y]) => ({ x: x * k + ox, y: y * k + oy })),
+        }));
+      });
+      savedPayload.current = new Map(imgs.map((_, i) => [i, JSON.stringify(payload(loaded, imgs, i))]));
+      setStored(imgs);
+      setShapes(loaded);
+      setHistory([]);
+      setFuture([]);
+      setSaved(true);
+      setIndex((x) => Math.min(x, Math.max(0, imgs.length - 1)));
+    }).catch((e: Error) => live && setSaveError(`Could not load images: ${e.message}`));
+    return () => { live = false; };
+  }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Shapes of image i in the backend's format: kept ones (with id) first, then new ones
+  const labelIds = () => new Map((p?.labels ?? []).map((l) => [l.name, l.id]));
+  function ordered(list: Shape[], i: number) {
+    const ids = labelIds();
+    return list.filter((s) => s.image === i && ids.get(s.label) != null)
+      .sort((a, b) => (a.dbId == null ? 1 : 0) - (b.dbId == null ? 1 : 0) || (a.dbId ?? 0) - (b.dbId ?? 0));
+  }
+  function payload(list: Shape[], imgs: ApiImage[], i: number): ApiAnnotation[] {
+    const { k, ox, oy } = fit(imgs[i]);
+    const ids = labelIds();
+    const clamp = (v: number, max: number) => Math.min(max, Math.max(0, v));
+    return ordered(list, i).map((s) => ({
+        ...(s.dbId != null && { id: s.dbId }), label: ids.get(s.label)!, kind: s.kind,
+        points: s.pts.map((q): [number, number] => [clamp((q.x - ox) / k, imgs[i].width), clamp((q.y - oy) / k, imgs[i].height)]),
+      }));
+  }
+
+  // Sends every image whose annotations changed since the last save
+  async function save() {
+    if (!stored || !projectId) return setSaved(true);
+    setSaveError('');
+    const snapshot = shapes;
+    try {
+      for (let i = 0; i < stored.length; i++) {
+        const body = payload(snapshot, stored, i);
+        const json = JSON.stringify(body);
+        if (savedPayload.current.get(i) === json) continue;
+        const res = await api<ApiAnnotation[]>(`/projects/${projectId}/images/${stored[i].id}/annotations/`, { method: 'PUT', json: { annotations: body } });
+        // Response is ordered by id, matching the payload order: remember the new ids
+        const dbIds = new Map(ordered(snapshot, i).map((s, j) => [s.id, res[j]?.id]));
+        setShapes((cur) => cur.map((s) => (dbIds.has(s.id) ? { ...s, dbId: dbIds.get(s.id) } : s)));
+        savedPayload.current.set(i, JSON.stringify(body.map((b, j) => ({ id: res[j]?.id, ...b }))));
+      }
+      setSaved(true);
+    } catch (e) {
+      setSaveError(`Save failed: ${(e as Error).message}`);
+      setSaved(false);
+    }
+  }
+
+  // Autosave: save shortly after the last change
+  useEffect(() => {
+    if (!autosave || saved) return;
+    const t = setTimeout(save, 800);
+    return () => clearTimeout(t);
+  }); // eslint-disable-line react-hooks/exhaustive-deps
 
   const color = (name: string) => labels.find((l) => l.name === name)?.color ?? '#999';
   const onImage = shapes.filter((s) => s.image === index);
@@ -108,10 +196,10 @@ export default function ProjectAnnotation() {
     setHistory((h) => [...h, shapes]);
     setFuture([]);
     setShapes(next);
-    setSaved(autosave);
+    setSaved(false);
   }
-  const undo = () => { if (!history.length) return; setFuture((f) => [shapes, ...f]); setShapes(history[history.length - 1]); setHistory((h) => h.slice(0, -1)); };
-  const redo = () => { if (!future.length) return; setHistory((h) => [...h, shapes]); setShapes(future[0]); setFuture((f) => f.slice(1)); };
+  const undo = () => { if (!history.length) return; setSaved(false); setFuture((f) => [shapes, ...f]); setShapes(history[history.length - 1]); setHistory((h) => h.slice(0, -1)); };
+  const redo = () => { if (!future.length) return; setSaved(false); setHistory((h) => [...h, shapes]); setShapes(future[0]); setFuture((f) => f.slice(1)); };
   const update = (id: number, patch: Partial<Shape>) => commit(shapes.map((s) => (s.id === id ? { ...s, ...patch } : s)));
   const resetView = () => { setZoom(1); setPan({ x: 0, y: 0 }); };
   const go = (i: number) => { setDraft(null); setActive(null); setIndex(Math.max(0, Math.min(images.length - 1, i))); };
@@ -251,9 +339,9 @@ export default function ProjectAnnotation() {
         <div className="flex items-stretch gap-2 2xl:gap-3">
           <div className="flex shrink-0 items-center rounded-lg border border-line bg-panel-2 py-1.5">
             <BarBtn icon={Menu} text="Menu" />
-            <BarBtn icon={Save} text={saved ? 'Saved' : 'Save'} onClick={() => setSaved(true)} />
+            <BarBtn icon={Save} text={saved ? 'Saved' : 'Save'} onClick={save} />
             <label className="flex shrink-0 items-center gap-2 whitespace-nowrap px-2 text-xs xl:text-sm" title="Autosave">
-              <button onClick={() => { setAutosave(!autosave); if (!autosave) setSaved(true); }} className={`relative h-5 w-9 rounded-full ${autosave ? 'bg-brand-500' : 'bg-panel-3'}`}>
+              <button onClick={() => setAutosave(!autosave)} className={`relative h-5 w-9 rounded-full ${autosave ? 'bg-brand-500' : 'bg-panel-3'}`}>
                 <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${autosave ? 'left-4.5' : 'left-0.5'}`} />
               </button>
               <span className="hidden lg:inline">Autosave {autosave ? 'ON' : 'OFF'}</span>
@@ -261,6 +349,7 @@ export default function ProjectAnnotation() {
             <BarBtn icon={Undo2} text="Undo" onClick={undo} disabled={!history.length} />
             <BarBtn icon={Redo2} text="Redo" onClick={redo} disabled={!future.length} />
           </div>
+          {saveError && <span className="self-center truncate text-xs text-red-400" title={saveError}>{saveError}</span>}
           <div className="flex shrink-0 items-center rounded-lg border border-line bg-panel-2 py-1.5">
             <BarBtn icon={ChevronLeft} text="Prev" onClick={() => go(index - 1)} disabled={index === 0} />
             <span className="whitespace-nowrap px-2 text-sm font-semibold">{index + 1} / {images.length}</span>
@@ -367,7 +456,7 @@ export default function ProjectAnnotation() {
                       <button title="Hide all" onClick={() => commit(shapes.map((s) => s.image === index ? { ...s, hidden: !onImage.every((x) => x.hidden) } : s))}><EyeOff className="h-4 w-4" /></button>
                       <ChevronDown className="h-4 w-4" />
                     </div>
-                    <div className="flex-1 space-y-2 overflow-auto">
+                    <div className="no-scrollbar flex-1 space-y-2 overflow-y-auto overscroll-contain scroll-smooth">
                       {!listed.length && <p className="p-4 text-center text-sm text-muted">No objects yet. Pick a draw tool and annotate the image.</p>}
                       {listed.map((s) => (
                         <div key={s.id} onClick={() => setActive(s.id)} className={`rounded-md border-l-4 bg-panel-3 p-2 ${active === s.id ? 'ring-2 ring-brand-500/50' : ''}`} style={{ borderLeftColor: color(s.label) }}>

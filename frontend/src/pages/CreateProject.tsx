@@ -1,14 +1,20 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronRight, Plus, Eye, FileArchive, FilePlus2, Folder, LayoutGrid, PlusCircle, Tag, X } from 'lucide-react';
-import { projects, type Label } from '../data/mock';
+import type { Label } from '../data/mock';
+import { api, cacheProject, toProject, type ApiProject } from '../lib/api';
 import { checkDataset, type DatasetEntry, type DatasetFormat } from '../lib/datasetFormat';
+import { clearFiles, clearStored, loadFiles, saveFiles, usePersistentState } from '../lib/persist';
 
 const swatches = ['#FF5A5F', '#4FD1FF', '#3B6CFF'];
 const steps = ['Project Info', 'Dataset Definition', 'Review & Create'];
 
 type Media = { file: File; url: string };
 type Dataset = { kind: 'zip' | 'folder'; name: string; files: File[]; previews: Media[]; loading?: boolean; format?: DatasetFormat; annotated?: number };
+// What gets written to IndexedDB so an unfinished project survives a refresh
+type StoredMedia = Omit<Media, 'url'>;
+type StoredDraft = { media: StoredMedia[]; dataset: (Omit<Dataset, 'previews'> & { previews?: StoredMedia[] }) | null; thumb: number };
+const DRAFT = 'create-project';
 
 const mediaTypes: Record<string, string> = {
   jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml',
@@ -31,6 +37,14 @@ async function zipEntries(zip: File) {
   const { default: JSZip } = await import('jszip');
   const archive = await JSZip.loadAsync(zip);
   return Object.values(archive.files).filter((f) => !f.dir).map((f) => ({ path: f.name, text: () => f.async('text'), blob: () => f.async('blob') }));
+}
+
+// The backend takes datasets as a ZIP, so an uploaded folder is zipped in the browser.
+async function folderZip(files: File[], name: string) {
+  const { default: JSZip } = await import('jszip');
+  const zip = new JSZip();
+  files.forEach((f) => zip.file(f.webkitRelativePath || f.name, f));
+  return new File([await zip.generateAsync({ type: 'blob' })], `${name}.zip`, { type: 'application/zip' });
 }
 
 const folderEntries = (files: File[]) => files.map((f) => ({ path: f.webkitRelativePath || f.name, text: () => f.text(), blob: async () => f as Blob }));
@@ -192,18 +206,19 @@ function LabelModal({ labels, onChange, onClose }: { labels: Label[]; onChange: 
 
 export default function CreateProject() {
   const navigate = useNavigate();
-  const [step, setStep] = useState(0);
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [color, setColor] = useState('#1DB4FF');
+  const [step, setStep] = usePersistentState(`${DRAFT}:step`, 0);
+  const [name, setName] = usePersistentState(`${DRAFT}:name`, '');
+  const [description, setDescription] = usePersistentState(`${DRAFT}:description`, '');
+  const [color, setColor] = usePersistentState(`${DRAFT}:color`, '#1DB4FF');
   const [media, setMedia] = useState<Media[]>([]);
   const [dataset, setDataset] = useState<Dataset | null>(null);
   const [datasetMenu, setDatasetMenu] = useState(false);
-  const [labels, setLabels] = useState<Label[]>([]);
+  const [labels, setLabels] = usePersistentState<Label[]>(`${DRAFT}:labels`, []);
   const [addingLabel, setAddingLabel] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [preview, setPreview] = useState<Media | null>(null);
   const [gallery, setGallery] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
   const mediaInput = useRef<HTMLInputElement>(null);
   const zipInput = useRef<HTMLInputElement>(null);
@@ -257,6 +272,42 @@ export default function CreateProject() {
 
   useEffect(() => () => media.forEach((m) => URL.revokeObjectURL(m.url)), []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Restore uploaded files/dataset from the last visit, then keep them saved as they change
+  const [restored, setRestored] = useState(false);
+  useEffect(() => {
+    let live = true;
+    loadFiles<StoredDraft>(DRAFT).then((draft) => {
+      if (!live) return;
+      if (draft) {
+        const restoredMedia = draft.media.map((m) => toMedia(m.file));
+        setMedia(restoredMedia);
+        const d = draft.dataset;
+        let previews: Media[] = [];
+        if (d?.previews) {
+          previews = d.previews.map((m) => toMedia(m.file));
+          setDataset({ ...d, previews, loading: false });
+        } else if (d) {
+          // It was still being read when the page closed: read it again
+          const files = d.files;
+          startDataset(d, d.kind === 'zip' ? () => zipEntries(files[0]) : async () => folderEntries(files));
+        }
+        setThumbnailUrl([...restoredMedia, ...previews][draft.thumb]?.url ?? null);
+      }
+      setRestored(true);
+    });
+    return () => { live = false; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!restored) return;
+    const strip = (m: Media): StoredMedia => ({ file: m.file });
+    saveFiles(DRAFT, {
+      media: media.map(strip),
+      dataset: dataset && { kind: dataset.kind, name: dataset.name, files: dataset.files, format: dataset.format, annotated: dataset.annotated, previews: dataset.loading ? undefined : dataset.previews.map(strip) },
+      thumb: Math.max(0, allMedia.findIndex((m) => m.url === thumbnailUrl)),
+    } satisfies StoredDraft);
+  }, [restored, media, dataset, thumbnailUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const validate = () => {
     const e: Record<string, string> = {};
     if (step === 0 && !name.trim()) e.name = 'Project name is required';
@@ -271,16 +322,28 @@ export default function CreateProject() {
   const next = () => validate() && setStep((s) => s + 1);
 
 
-  const create = () => {
-    projects.push({
-      id: Math.max(0, ...projects.map((p) => p.id)) + 1, name: name.trim(), owner: 'haroon', updated: 'just now', labels,
-      description: description.trim() || undefined, color,
-      media: allMedia.filter((m) => m.file.type.startsWith('image')).map((m) => URL.createObjectURL(m.file)),
-      images: allMedia.length, annotated: dataset?.annotated ?? 0, created: new Date().toISOString(),
-      // Own object URL so it survives this page revoking its preview URLs on unmount
-      thumbnail: thumbnail && !thumbnail.file.type.startsWith('video') ? URL.createObjectURL(thumbnail.file) : undefined,
-    });
-    navigate('/projects');
+  // Saves the project in the backend; it imports the dataset's images and annotations.
+  const create = async () => {
+    setSaving(true);
+    setErrors({});
+    try {
+      const form = new FormData();
+      form.append('name', name.trim());
+      form.append('description', description.trim());
+      form.append('color', color);
+      form.append('labels', JSON.stringify(labels.map((l) => ({ name: l.name, color: l.color }))));
+      if (dataset) form.append('dataset', dataset.kind === 'zip' ? dataset.files[0] : await folderZip(dataset.files, dataset.name));
+      media.filter((m) => m.file.type.startsWith('image')).forEach((m) => form.append('media', m.file));
+      const created = await api<ApiProject>('/projects/', { method: 'POST', body: form });
+      cacheProject(toProject(created));
+      clearStored(DRAFT);
+      clearFiles(DRAFT);
+      navigate('/projects');
+    } catch (err) {
+      setErrors({ create: (err as Error).message });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -454,9 +517,10 @@ export default function CreateProject() {
         </>
       )}
 
+      {step === 2 && <FieldError text={errors.create} />}
       <div className={`mt-10 flex ${step === 0 ? 'justify-end' : 'justify-between'}`}>
         {step > 0 && <button className="btn rounded-lg bg-panel-2 px-6 py-3 text-muted hover:text-ink" onClick={() => { setErrors({}); setStep(step - 1); }}>Previous</button>}
-        {step < 2 ? <ArrowButton onClick={next}>Next</ArrowButton> : <ArrowButton onClick={create}>Create Project</ArrowButton>}
+        {step < 2 ? <ArrowButton onClick={next}>Next</ArrowButton> : <ArrowButton onClick={create} disabled={saving}>{saving ? 'Creating…' : 'Create Project'}</ArrowButton>}
       </div>
 
       {addingLabel && (

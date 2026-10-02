@@ -2,13 +2,16 @@ import { useState } from 'react';
 import { Box, ChevronRight, Plus, Workflow } from 'lucide-react';
 import { Badge, Modal, PageHeader, Section } from '../components/ui';
 import type { models as mockModels } from '../data/mock';
+import { usePersistentState } from '../lib/persist';
+import { useParams } from 'react-router-dom';
 
 type Model = (typeof mockModels)[number];
 
 export default function Models() {
+  const { id } = useParams();
   const [adding, setAdding] = useState(false);
-  const [models, setModels] = useState<Model[]>([]);
-  const [form, setForm] = useState({ name: '', type: 'detector', framework: 'PyTorch' });
+  const [models, setModels] = usePersistentState<Model[]>(`models:${id}`, []);
+  const [form, setForm] = usePersistentState(`models:${id}:form`, { name: '', type: 'detector', framework: 'PyTorch' });
 
   const submit = () => {
     if (!form.name.trim()) return;

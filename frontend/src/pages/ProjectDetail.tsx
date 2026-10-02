@@ -1,13 +1,11 @@
-import { Link, useParams } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { Calendar, ChevronDown, ChevronRight, Clock, Eye, HelpCircle, Image, MoreVertical, Tag, Upload, X } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Empty } from '../components/ui';
-import { projects, tasks } from '../data/mock';
+import { tasks } from '../data/mock';
+import { useProject } from '../lib/api';
 
-export function useProject() {
-  const { id } = useParams();
-  return projects.find((x) => x.id === Number(id));
-}
+export { useProject };
 
 function Card({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   return (
@@ -159,7 +157,7 @@ function ActionsMenu({ onPick }: { onPick: (m: 'export' | 'import') => void }) {
 export default function ProjectDetail() {
   const [dialog, setDialog] = useState<'export' | 'import' | null>(null);
   const p = useProject();
-  if (!p) return <Empty text="Project not found" />;
+  if (!p) return <Empty text={p === undefined ? 'Loading…' : 'Project not found'} />;
   const pt = tasks.filter((t) => t.projectId === p.id);
   const total = p.images ?? pt.reduce((n, t) => n + t.frames, 0);
   const annotated = p.annotated ?? pt.reduce((n, t) => n + Math.round((t.frames * t.jobsDone) / t.jobs), 0);
