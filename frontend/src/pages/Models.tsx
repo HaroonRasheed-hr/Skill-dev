@@ -1,21 +1,44 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Box, ChevronRight, Plus, Workflow } from 'lucide-react';
 import { Badge, Modal, PageHeader, Section } from '../components/ui';
 import type { models as mockModels } from '../data/mock';
 import { usePersistentState } from '../lib/persist';
 import { useParams } from 'react-router-dom';
+import { api, type ApiTrainingJob } from '../lib/api';
 
 type Model = (typeof mockModels)[number];
+
+const fmtDate = (d: string | Date) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
+
+/** A training job shown as a model row, under the name the user gave it. */
+function jobToModel(j: ApiTrainingJob): Model {
+  const map = j.metrics?.bbox_mAP ?? j.metrics?.segm_mAP;
+  return {
+    id: `job-${j.id}`, name: j.name, type: 'detector', framework: j.architecture_label || 'PyTorch', version: 'v1',
+    labels: j.class_names ?? [], status: j.status === 'completed' ? 'trained' : j.status,
+    map: map != null ? Number(map.toFixed(2)) : null, updated: fmtDate(j.finished_at ?? j.created_at),
+  } as Model;
+}
 
 export default function Models() {
   const { id } = useParams();
   const [adding, setAdding] = useState(false);
   const [models, setModels] = usePersistentState<Model[]>(`models:${id}`, []);
+  const [trained, setTrained] = useState<Model[]>([]);
   const [form, setForm] = usePersistentState(`models:${id}:form`, { name: '', type: 'detector', framework: 'PyTorch' });
+
+  useEffect(() => {
+    if (!id) return;
+    api<ApiTrainingJob[]>(`/projects/${id}/training/jobs/`)
+      .then((jobs) => setTrained(jobs.filter((j) => j.status !== 'cancelled').map(jobToModel)))
+      .catch(() => {});
+  }, [id]);
+
+  const all = [...trained, ...models];
 
   const submit = () => {
     if (!form.name.trim()) return;
-    const updated = new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
+    const updated = fmtDate(new Date());
     setModels((ms) => [...ms, { id: `${form.name}-${Date.now()}`, name: form.name.trim(), type: form.type, framework: form.framework, version: 'v1', labels: [], status: 'trained', map: null, updated }]);
     setForm({ name: '', type: 'detector', framework: 'PyTorch' });
     setAdding(false);
@@ -34,11 +57,11 @@ export default function Models() {
     <>
       <PageHeader title="Models" icon={Workflow} />
       <Section title="Model List" action={upload}>
-        {models.length === 0 ? (
+        {all.length === 0 ? (
           <p className="text-sm text-muted">No logs or model yet</p>
         ) : (
         <div className="divide-y divide-line">
-          {models.map((m) => (
+          {all.map((m) => (
             <div key={m.id} className="flex items-center gap-4 py-4">
               <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-50 text-brand-500"><Box className="h-5 w-5" /></span>
               <div className="flex-1">

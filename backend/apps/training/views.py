@@ -117,3 +117,54 @@ class TrainingJobCheckpointView(ProjectScopedView):
             raise NotFound("No trained model is available for this job.")
         filename = f"{job.name}-{job.architecture}.pth".replace(" ", "_")
         return FileResponse(path.open("rb"), as_attachment=True, filename=filename)
+
+
+_detectors = {}  # checkpoint path -> loaded model, so each request doesn't reload the weights
+
+
+class TrainingJobInferView(ProjectScopedView):
+    """Run a completed job's model on one uploaded image and return the detections."""
+
+    def post(self, request, project_id, job_id):
+        job = self.get_job()
+        path = Path(job.checkpoint) if job.checkpoint else None
+        config = Path(job.work_dir) / "config.py" if job.work_dir else None
+        if job.status != TrainingJob.Status.COMPLETED or not path or not path.is_file() \
+                or not config or not config.is_file():
+            raise NotFound("No trained model is available for this job.")
+        upload = request.FILES.get("image")
+        if not upload:
+            raise serializers.ValidationError({"image": ["Upload an image."]})
+
+        import numpy as np
+        from PIL import Image
+
+        try:
+            image = np.array(Image.open(upload).convert("RGB"))[:, :, ::-1].copy()  # mmdet expects BGR
+        except Exception:
+            raise serializers.ValidationError({"image": ["Not a valid image."]})
+
+        from .runner import force_cpu
+        force_cpu()
+        from mmdet.apis import inference_detector, init_detector
+        from mmdet.utils import register_all_modules
+
+        register_all_modules(init_default_scope=True)
+        key = str(path)
+        if key not in _detectors:
+            from mmengine.config import Config
+            cfg = Config.fromfile(str(config))
+            if cfg.get("test_dataloader") is None:  # training configs disable test; reuse the val pipeline
+                cfg.test_dataloader = cfg.val_dataloader
+            _detectors[key] = init_detector(cfg, key, device="cpu")
+        result = inference_detector(_detectors[key], image).pred_instances
+
+        threshold = 0.3
+        names = job.class_names or []
+        detections = [
+            {"box": [round(float(v), 1) for v in box], "score": round(float(score), 3),
+             "label": names[int(label)] if int(label) < len(names) else str(int(label))}
+            for box, score, label in zip(result.bboxes.tolist(), result.scores.tolist(), result.labels.tolist())
+            if score >= threshold
+        ]
+        return Response({"detections": detections})

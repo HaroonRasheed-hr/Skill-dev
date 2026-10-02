@@ -10,4 +10,5 @@ urlpatterns = [
     path("jobs/<int:job_id>/", views.TrainingJobDetailView.as_view(), name="job-detail"),
     path("jobs/<int:job_id>/cancel/", views.TrainingJobCancelView.as_view(), name="job-cancel"),
     path("jobs/<int:job_id>/checkpoint/", views.TrainingJobCheckpointView.as_view(), name="job-checkpoint"),
+    path("jobs/<int:job_id>/infer/", views.TrainingJobInferView.as_view(), name="job-infer"),
 ]
