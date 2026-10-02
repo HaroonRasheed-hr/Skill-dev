@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { ChevronRight, Zap } from 'lucide-react';
-import { Empty } from '../components/ui';
+import { Empty, Modal } from '../components/ui';
 import { jobs, tasks } from '../data/mock';
 import { useProject } from './ProjectDetail';
 
-const TRAIN_SPLIT = 0.8;
+const SPLIT_PRESETS = [60, 70, 80, 90];
 
 // "0-149" -> 150
 const rangeSize = (r: string) => {
@@ -42,6 +42,10 @@ function SummaryRow({ label, value, dot }: { label: string; value: number; dot: 
 export default function Training() {
   const p = useProject();
   const [expanded, setExpanded] = useState(false);
+  const [configuring, setConfiguring] = useState(false);
+  const [modelName, setModelName] = useState('');
+  const [split, setSplit] = useState(70);
+  const [started, setStarted] = useState<string | null>(null);
   if (!p) return <Empty text="Project not found" />;
 
   const pt = tasks.filter((t) => t.projectId === p.id);
@@ -50,7 +54,7 @@ export default function Training() {
     .filter((j) => j.state === 'completed' && pt.some((t) => t.id === j.taskId))
     .reduce((s, j) => s + rangeSize(j.frames), 0);
   const annotatedPct = total ? Math.round((annotated / total) * 100) : 0;
-  const trainCount = Math.round(annotated * TRAIN_SPLIT);
+  const trainCount = Math.round((annotated * split) / 100);
   const valCount = annotated - trainCount;
   const pctOf = (n: number) => (total ? Math.round((n / total) * 100) : 0);
   const classes = p.labels?.length ?? 0;
@@ -68,12 +72,19 @@ export default function Training() {
         <h1 className="text-xl font-semibold">Train</h1>
         <button
           disabled={annotated === 0}
+          onClick={() => setConfiguring(true)}
           className="ml-auto flex items-center rounded-xl bg-brand-500 px-4 py-4 font-semibold text-slate-900 hover:bg-brand-500/90 disabled:cursor-not-allowed"
         >
           Start Training
           <span className="ml-4 border-l border-slate-900/20 pl-4"><ChevronRight className="h-4 w-4" /></span>
         </button>
       </div>
+
+      {started && (
+        <div className="mb-6 rounded-xl border border-brand-500/40 bg-brand-500/10 px-5 py-3 text-sm">
+          Training started for <span className="font-semibold">{started}</span> — {trainCount} images for training, {valCount} for testing.
+        </div>
+      )}
 
       <section className="card rounded-2xl p-10">
         <div className="flex items-center justify-between border-b border-line pb-6">
@@ -131,7 +142,7 @@ export default function Training() {
         {expanded && (
           <div className="mt-6 grid gap-6 lg:grid-cols-2">
             <BatchCard title="Train Batch" pct={pctOf(trainCount)} caption={`${trainCount} Images for Training`} />
-            <BatchCard title="VAL Batch" pct={pctOf(valCount)} caption={`${valCount} Images for Validation`} />
+            <BatchCard title="Test Batch" pct={pctOf(valCount)} caption={`${valCount} Images for Testing`} />
           </div>
         )}
 
@@ -144,6 +155,66 @@ export default function Training() {
           </button>
         </div>
       </section>
+
+      {configuring && (
+        <Modal title="Start Training" onClose={() => setConfiguring(false)}>
+          <form
+            className="space-y-5"
+            onSubmit={(e) => {
+              e.preventDefault();
+              setStarted(modelName.trim());
+              setConfiguring(false);
+            }}
+          >
+            <label className="block space-y-1.5">
+              <span className="text-sm font-medium">Model name</span>
+              <input
+                autoFocus
+                required
+                className="input"
+                placeholder="e.g. defect-detector-v1"
+                value={modelName}
+                onChange={(e) => setModelName(e.target.value)}
+              />
+            </label>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-sm font-medium">
+                <span>Train / Test split</span>
+                <span>{split}% / {100 - split}%</span>
+              </div>
+              <input
+                type="range" min={10} max={95} step={5} value={split}
+                onChange={(e) => setSplit(Number(e.target.value))}
+                className="w-full accent-brand-500"
+              />
+              <div className="flex gap-2">
+                {SPLIT_PRESETS.map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setSplit(v)}
+                    className={`rounded-full border px-3 py-1 text-xs ${split === v ? 'border-brand-500 bg-brand-500/15 text-brand-500' : 'border-line text-muted'}`}
+                  >
+                    {v}/{100 - v}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 text-center text-sm">
+              <div className="rounded-lg bg-panel-3 py-3"><p className="text-2xl font-bold">{trainCount}</p>Training images</div>
+              <div className="rounded-lg bg-brand-500/15 py-3"><p className="text-2xl font-bold">{valCount}</p>Testing images</div>
+            </div>
+            <p className="text-xs text-muted">Out of {annotated} annotated images.</p>
+
+            <div className="flex justify-end gap-2">
+              <button type="button" className="btn-ghost" onClick={() => setConfiguring(false)}>Cancel</button>
+              <button type="submit" className="btn-primary" disabled={!modelName.trim()}>Start Training</button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </>
   );
 }
