@@ -297,7 +297,7 @@ export default function Training() {
               <span className="text-sm font-medium">Start from</span>
               <select className="input" value={baseModel?.id ?? ''} onChange={(e) => setBaseJobId(e.target.value ? Number(e.target.value) : '')}>
                 <option value="">Pretrained weights (COCO)</option>
-                {trainedModels.map((m) => <option key={m.id} value={m.id}>Retrain: {m.name} ({m.architecture_label})</option>)}
+                {trainedModels.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
               </select>
             </label>
 
