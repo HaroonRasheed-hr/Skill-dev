@@ -2,8 +2,8 @@ import { Link } from 'react-router-dom';
 import { Calendar, ChevronDown, ChevronRight, Clock, Eye, HelpCircle, Image, MoreVertical, Tag, Upload, X } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Empty } from '../components/ui';
-import { tasks } from '../data/mock';
-import { useProject } from '../lib/api';
+import { tasks, type Project } from '../data/mock';
+import { api, cacheProject, downloadFile, toProject, useProject, type ApiProject } from '../lib/api';
 
 export { useProject };
 
@@ -52,7 +52,8 @@ function BarChart({ data }: { data: { name: string; value: number; color: string
   );
 }
 
-const FORMATS = ['COCO 1.0', 'YOLO 1.1', 'Pascal VOC 1.1', 'CVAT for images 1.1', 'Datumaro 1.0', 'Segmentation mask 1.1'];
+// [label, backend value]: the formats the backend can export and import
+const FORMATS = [['COCO 1.0', 'coco'], ['YOLO 1.1', 'yolo'], ['Pascal VOC 1.1', 'voc']];
 
 function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
   return (
@@ -63,14 +64,39 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void 
   );
 }
 
-function DatasetDialog({ mode, onClose }: { mode: 'export' | 'import'; onClose: () => void }) {
+function DatasetDialog({ mode, project, onClose, onImported }: {
+  mode: 'export' | 'import'; project: Project; onClose: () => void; onImported: (p: Project) => void;
+}) {
   const exp = mode === 'export';
   const [format, setFormat] = useState('');
   const [images, setImages] = useState(false);
   const [name, setName] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [defaults, setDefaults] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
   const valid = format && (exp || file);
+
+  const submit = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      if (exp) {
+        const q = new URLSearchParams({ dataset_format: format, images: images ? '1' : '0', name: name.trim() });
+        await downloadFile(`/projects/${project.id}/export/?${q}`, `${project.name}_${format}.zip`);
+      } else {
+        const body = new FormData();
+        body.append('dataset', file!);
+        const p = toProject(await api<ApiProject>(`/projects/${project.id}/import/`, { method: 'POST', body }));
+        cacheProject(p);
+        onImported(p);
+      }
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Something went wrong.');
+      setBusy(false);
+    }
+  };
   const field = 'w-full rounded-lg border border-line bg-panel-3 px-3 py-2 text-sm outline-none focus:border-cyan-400';
 
   return (
@@ -86,7 +112,7 @@ function DatasetDialog({ mode, onClose }: { mode: 'export' | 'import'; onClose: 
             <div className="relative">
               <select value={format} onChange={(e) => setFormat(e.target.value)} className={`${field} appearance-none pr-9 ${format ? '' : 'text-muted'}`}>
                 <option value="" disabled>Select dataset format</option>
-                {FORMATS.map((f) => <option key={f} value={f} className="text-white">{f}</option>)}
+                {FORMATS.map(([label, value]) => <option key={value} value={value} className="text-white">{label}</option>)}
               </select>
               <ChevronDown className="pointer-events-none absolute right-3 top-2.5 h-4 w-4 text-muted" />
             </div>
@@ -116,10 +142,13 @@ function DatasetDialog({ mode, onClose }: { mode: 'export' | 'import'; onClose: 
             <Toggle on={defaults} onChange={setDefaults} />Use default settings
             <HelpCircle className="h-4 w-4 text-muted" />
           </label>
+          {error && <p className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-400">{error}</p>}
         </div>
         <div className="flex justify-end gap-3 border-t border-line px-6 py-4">
           <button onClick={onClose} className="rounded-lg border border-line px-4 py-2 text-sm hover:bg-panel-3">Cancel</button>
-          <button onClick={onClose} disabled={!valid} className="rounded-lg bg-cyan-400 px-5 py-2 text-sm font-semibold text-slate-900 hover:bg-cyan-300 disabled:opacity-50">OK</button>
+          <button onClick={submit} disabled={!valid || busy} className="rounded-lg bg-cyan-400 px-5 py-2 text-sm font-semibold text-slate-900 hover:bg-cyan-300 disabled:opacity-50">
+            {busy ? (exp ? 'Exporting…' : 'Importing…') : 'OK'}
+          </button>
         </div>
       </div>
     </div>
@@ -156,7 +185,10 @@ function ActionsMenu({ onPick }: { onPick: (m: 'export' | 'import') => void }) {
 
 export default function ProjectDetail() {
   const [dialog, setDialog] = useState<'export' | 'import' | null>(null);
-  const p = useProject();
+  const [imported, setImported] = useState<Project | null>(null);
+  const loaded = useProject();
+  // After an import, show the updated counts and classes without refetching
+  const p = loaded && imported?.id === loaded.id ? imported : loaded;
   if (!p) return <Empty text={p === undefined ? 'Loading…' : 'Project not found'} />;
   const pt = tasks.filter((t) => t.projectId === p.id);
   const total = p.images ?? pt.reduce((n, t) => n + t.frames, 0);
@@ -177,7 +209,7 @@ export default function ProjectDetail() {
         <h1 className="text-lg font-semibold">Overview</h1>
         <ActionsMenu onPick={setDialog} />
       </div>
-      {dialog && <DatasetDialog key={dialog} mode={dialog} onClose={() => setDialog(null)} />}
+      {dialog && <DatasetDialog key={dialog} mode={dialog} project={p} onClose={() => setDialog(null)} onImported={setImported} />}
 
       <div className="grid gap-5 lg:grid-cols-2">
         <Card

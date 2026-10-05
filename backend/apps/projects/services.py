@@ -164,3 +164,49 @@ def create_project(*, owner, name, description="", color="#1DB4FF", labels=(), d
                 storage.delete(path)
             raise
     return project
+
+
+def import_into_project(*, project, dataset):
+    """Add the images, labels and annotations of a dataset ZIP to an existing project.
+
+    New classes become labels; classes that match an existing label (case-insensitive)
+    reuse it. Like ``create_project``, either everything is saved or nothing is.
+    Returns the number of images added.
+    """
+    stored = []
+    with ExitStack() as stack:
+        images, _videos, parsed = read_dataset(dataset, stack)
+        if not images:
+            raise DatasetError("No images found. The dataset must contain images and their annotations.")
+        try:
+            with transaction.atomic():
+                existing = list(project.labels.all())
+                known = {lbl.name.lower() for lbl in existing}
+                merged = merge_labels([{"name": lbl.name, "color": lbl.color} for lbl in existing], parsed.classes)
+                Label.objects.bulk_create(
+                    Label(project=project, **item) for item in merged if item["name"].lower() not in known
+                )
+                by_label = {lbl.name.lower(): lbl for lbl in project.labels.all()}
+
+                annotations = []
+                for entry in images:
+                    img = Image(project=project, original_name=entry.path[:255])
+                    img.file.save(entry.name, ContentFile(entry.read(), name=entry.name), save=False)
+                    stored.append(img.file.name)
+                    img.save()
+                    annotations += [
+                        Annotation(image=img, label=by_label[s.label.lower()], kind=s.kind,
+                                   points=s.points, source=Annotation.Source.IMPORTED)
+                        for s in parsed.annotations.get(entry.path, [])
+                    ]
+                Annotation.objects.bulk_create(annotations, batch_size=1000)
+
+                if project.thumbnail_id is None:
+                    project.thumbnail = project.images.first()
+                project.save(update_fields=["thumbnail", "updated_at"])
+        except Exception:
+            storage = Image._meta.get_field("file").storage
+            for path in stored:
+                storage.delete(path)
+            raise
+    return len(images)

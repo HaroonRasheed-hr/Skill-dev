@@ -1,6 +1,9 @@
+from django.core.exceptions import SuspiciousFileOperation
 from django.db import transaction
 from django.db.models import Count, Prefetch, Q
+from django.http import FileResponse
 from django.shortcuts import get_object_or_404
+from django.utils.text import get_valid_filename
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
@@ -9,6 +12,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .datasets import DatasetError
+from .exports import FORMATS as EXPORT_FORMATS
+from .exports import export_dataset
 from .models import Annotation, Image, Project
 from .serializers import (
     AnnotationSerializer,
@@ -16,11 +21,18 @@ from .serializers import (
     ProjectCreateSerializer,
     ProjectSerializer,
 )
-from .services import create_project
+from .services import create_project, import_into_project
 
 
 def owned_projects(user):
     return Project.objects.filter(owner=user)
+
+
+def safe_filename(value: str) -> str:
+    try:
+        return get_valid_filename(value)[:150]
+    except SuspiciousFileOperation:  # nothing usable left, e.g. an empty name
+        return ""
 
 
 class ImagePagination(PageNumberPagination):
@@ -69,6 +81,36 @@ class ProjectViewSet(viewsets.ModelViewSet):
         return paginator.get_paginated_response(
             ImageSerializer(page, many=True, context=self.get_serializer_context()).data
         )
+
+    @action(detail=True, methods=["get"], url_path="export")
+    def export_dataset(self, request, pk=None):
+        """Download the project as a dataset ZIP.
+
+        Query: ``dataset_format`` (coco | yolo | voc), ``images`` (1 to include image files),
+        ``name`` (optional file name). Not ``format``: DRF reserves it for renderers.
+        """
+        project = self.get_object()
+        fmt = request.query_params.get("dataset_format", "")
+        if fmt not in EXPORT_FORMATS:
+            raise serializers.ValidationError({"dataset_format": [f"Use one of: {', '.join(EXPORT_FORMATS)}."]})
+        with_images = request.query_params.get("images") in ("1", "true")
+        name = safe_filename(request.query_params.get("name", "").strip().removesuffix(".zip")) \
+            or safe_filename(f"{project.name}_{fmt}") or f"project_{project.pk}_{fmt}"
+        return FileResponse(export_dataset(project, fmt, with_images), as_attachment=True,
+                            filename=f"{name}.zip", content_type="application/zip")
+
+    @action(detail=True, methods=["post"], url_path="import")
+    def import_dataset(self, request, pk=None):
+        """Add the images and annotations of an uploaded dataset ZIP (field ``dataset``) to the project."""
+        project = self.get_object()
+        dataset = request.FILES.get("dataset")
+        if dataset is None:
+            raise serializers.ValidationError({"dataset": ["Upload a .zip dataset file."]})
+        try:
+            import_into_project(project=project, dataset=dataset)
+        except DatasetError as exc:
+            raise serializers.ValidationError({"dataset": [str(exc)]})
+        return Response(self.get_serializer(self.get_queryset().get(pk=project.pk)).data)
 
 
 class ImageAnnotationsView(APIView):
