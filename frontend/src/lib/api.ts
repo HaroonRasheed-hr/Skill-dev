@@ -57,6 +57,21 @@ export async function api<T = unknown>(path: string, init: RequestInit & { json?
   return data as T;
 }
 
+/** Downloads a file from the backend API (with the auth token) and saves it in the browser. */
+export async function downloadFile(path: string, fallbackName: string, retry = true): Promise<void> {
+  const token = readTokens()?.access;
+  const res = await fetch(`/api/v1${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (res.status === 401 && token && retry && await refresh()) return downloadFile(path, fallbackName, false);
+  if (!res.ok) throw new ApiError(res.status, await res.json().catch(() => null));
+  const name = res.headers.get('Content-Disposition')?.match(/filename="?([^";]+)"?/)?.[1] ?? fallbackName;
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 // --- Projects ---
 
 export type ApiLabel = { id: number; name: string; color: string };
