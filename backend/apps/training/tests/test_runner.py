@@ -73,6 +73,22 @@ class RunJobTests(TempStorageMixin, TestCase):
         runner.run_job(self.job, trainer=lambda j, cfg, r: captured.setdefault("c", cfg) and fake_trainer(j, cfg, r))
         self.assertIsNone(captured["c"].load_from)
 
+    def test_retrain_loads_base_model_weights(self):
+        base = make_job(self.project, name="base", status=S.COMPLETED)
+        runner.run_job(base, trainer=fake_trainer)
+        self.job.base_job = base
+        captured = {}
+        runner.run_job(self.job, trainer=lambda j, cfg, r: captured.setdefault("c", cfg) and fake_trainer(j, cfg, r))
+        self.assertEqual(captured["c"].load_from, base.checkpoint)
+
+    def test_retrain_fails_when_base_weights_are_gone(self):
+        self.job.base_job = make_job(self.project, name="base", status=S.COMPLETED, checkpoint="/missing.pth")
+        with self.assertLogs("apps.training.runner", "ERROR"):
+            runner.run_job(self.job, trainer=fake_trainer)
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.status, S.FAILED)
+        self.assertIn("no longer has its trained weights", self.job.error)
+
     def test_trainer_error_marks_job_failed(self):
         def boom(job, cfg, reporter):
             raise RuntimeError("out of memory")

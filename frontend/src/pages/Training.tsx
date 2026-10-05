@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { ChevronRight, Zap } from 'lucide-react';
 import { Empty, Modal } from '../components/ui';
 import { useProject } from './ProjectDetail';
@@ -44,6 +45,10 @@ export default function Training() {
   const [split, setSplit] = usePersistentState(`${key}:split`, 70);
   const [architecture, setArchitecture] = usePersistentState(`${key}:arch`, 'rtmdet_tiny');
   const [epochs, setEpochs] = usePersistentState<number | ''>(`${key}:epochs`, '');
+  // A completed model to retrain from; '' starts from the COCO-pretrained weights.
+  const [baseJobId, setBaseJobId] = usePersistentState<number | ''>(`${key}:base`, '');
+  const [trainedModels, setTrainedModels] = useState<ApiTrainingJob[]>([]);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [summary, setSummary] = useState<ApiTrainingSummary | null>(null);
   const [job, setJob] = useState<ApiTrainingJob | null>(null);
   const [error, setError] = useState('');
@@ -54,16 +59,26 @@ export default function Training() {
   // Annotation counts come from the images saved on the Annotation page.
   const load = useCallback(async () => {
     if (!projectId) return;
-    const s = await api<ApiTrainingSummary>(`/projects/${projectId}/training/summary/`);
+    const [s, jobs] = await Promise.all([
+      api<ApiTrainingSummary>(`/projects/${projectId}/training/summary/`),
+      api<ApiTrainingJob[]>(`/projects/${projectId}/training/jobs/`),
+    ]);
     setSummary(s);
-    if (s.active_job) setJob(s.active_job);
-    else {
-      const [latest] = await api<ApiTrainingJob[]>(`/projects/${projectId}/training/jobs/`);
-      setJob(latest ?? null);
-    }
+    setTrainedModels(jobs.filter((j) => j.status === 'completed' && j.has_checkpoint));
+    setJob(s.active_job ?? jobs[0] ?? null);
   }, [projectId]);
 
   useEffect(() => { load().catch((e) => setError(e instanceof Error ? e.message : String(e))); }, [load]);
+
+  // "Retrain" on the Models page links here with ?retrain=<job id>: open the dialog with that model picked.
+  useEffect(() => {
+    const retrain = Number(searchParams.get('retrain'));
+    if (!projectId || !retrain) return;
+    setBaseJobId(retrain);
+    setError('');
+    setConfiguring(true);
+    setSearchParams({}, { replace: true });
+  }, [projectId, searchParams, setSearchParams, setBaseJobId]);
 
   // While a job is queued or running, poll it for progress.
   const active = job?.status === 'queued' || job?.status === 'running';
@@ -85,6 +100,7 @@ export default function Training() {
   const [trainCount, valCount] = splitCounts(usable, split);
   const pctOf = (n: number) => (total ? Math.round((n / total) * 100) : 0);
   const classes = summary.classes.length;
+  const baseModel = trainedModels.find((m) => m.id === baseJobId);
 
   const startTraining = async () => {
     setSubmitting(true);
@@ -92,7 +108,10 @@ export default function Training() {
     try {
       const created = await api<ApiTrainingJob>(`/projects/${p.id}/training/jobs/`, {
         method: 'POST',
-        json: { name: modelName.trim(), architecture, train_split: split, ...(epochs ? { epochs } : {}) },
+        json: {
+          name: modelName.trim(), architecture, train_split: split, ...(epochs ? { epochs } : {}),
+          ...(baseModel ? { base_job: baseModel.id } : {}),
+        },
       });
       setJob(created);
       setConfiguring(false);
@@ -275,10 +294,23 @@ export default function Training() {
             </div>
 
             <label className="block space-y-1.5">
+              <span className="text-sm font-medium">Start from</span>
+              <select className="input" value={baseModel?.id ?? ''} onChange={(e) => setBaseJobId(e.target.value ? Number(e.target.value) : '')}>
+                <option value="">Pretrained weights (COCO)</option>
+                {trainedModels.map((m) => <option key={m.id} value={m.id}>Retrain: {m.name} ({m.architecture_label})</option>)}
+              </select>
+            </label>
+
+            <label className="block space-y-1.5">
               <span className="text-sm font-medium">Model architecture</span>
-              <select className="input" value={architecture} onChange={(e) => setArchitecture(e.target.value)}>
+              <select
+                className="input" disabled={!!baseModel}
+                value={baseModel ? baseModel.architecture : architecture}
+                onChange={(e) => setArchitecture(e.target.value)}
+              >
                 {summary.architectures.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
               </select>
+              {baseModel && <span className="text-xs text-muted">Retraining keeps the architecture of {baseModel.name}.</span>}
             </label>
 
             <label className="block space-y-1.5">

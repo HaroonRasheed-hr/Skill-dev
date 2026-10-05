@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Box, ChevronRight, Download, Plus, Workflow } from 'lucide-react';
+import { Box, ChevronRight, Download, Plus, RotateCcw, Workflow } from 'lucide-react';
 import { Badge, Modal, PageHeader, Section } from '../components/ui';
 import type { models as mockModels } from '../data/mock';
 import { usePersistentState } from '../lib/persist';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { api, downloadFile, type ApiTrainingJob } from '../lib/api';
 
-type Model = (typeof mockModels)[number] & { jobId?: number; hasCheckpoint?: boolean };
+type Model = (typeof mockModels)[number] & { jobId?: number; hasCheckpoint?: boolean; baseName?: string | null };
 
 const fmtDate = (d: string | Date) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
 
@@ -17,12 +17,13 @@ function jobToModel(j: ApiTrainingJob): Model {
     id: `job-${j.id}`, name: j.name, type: 'detector', framework: j.architecture_label || 'PyTorch', version: 'v1',
     labels: j.class_names ?? [], status: j.status === 'completed' ? 'trained' : j.status,
     map: map != null ? Number(map.toFixed(2)) : null, updated: fmtDate(j.finished_at ?? j.created_at),
-    jobId: j.id, hasCheckpoint: j.has_checkpoint,
+    jobId: j.id, hasCheckpoint: j.has_checkpoint, baseName: j.base_job_name,
   } as Model;
 }
 
 export default function Models() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const [adding, setAdding] = useState(false);
   const [models, setModels] = usePersistentState<Model[]>(`models:${id}`, []);
   const [trained, setTrained] = useState<Model[]>([]);
@@ -72,13 +73,16 @@ export default function Models() {
               <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-50 text-brand-500"><Box className="h-5 w-5" /></span>
               <div className="flex-1">
                 <h3 className="font-semibold">{m.name}</h3>
-                <p className="text-xs text-muted">{m.framework} · {m.version} · <span className="capitalize">{m.type}</span> · updated {m.updated}</p>
+                <p className="text-xs text-muted">{m.framework} · {m.version} · <span className="capitalize">{m.type}</span> · updated {m.updated}{m.baseName && <> · retrained from {m.baseName}</>}</p>
               </div>
               <div className="hidden gap-1 lg:flex">{m.labels.map((l) => <span key={l} className="rounded bg-panel-3 px-2 py-0.5 text-xs">{l}</span>)}</div>
               <span className="w-20 text-right text-sm">{m.map ? `mAP ${m.map}` : '-'}</span>
               <Badge>{m.status}</Badge>
               {m.hasCheckpoint && (
                 <button className="btn-ghost flex items-center gap-1" onClick={() => download(m)} title="Download model weights"><Download className="h-4 w-4" />Download</button>
+              )}
+              {m.jobId && m.status === 'trained' && m.hasCheckpoint && (
+                <button className="btn-ghost flex items-center gap-1" onClick={() => navigate(`/projects/${id}/train?retrain=${m.jobId}`)} title="Train this model again on the current annotations"><RotateCcw className="h-4 w-4" />Retrain</button>
               )}
               <button className="btn-ghost">{m.status === 'deployed' ? 'Run' : 'Deploy'}</button>
             </div>

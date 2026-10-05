@@ -147,6 +147,15 @@ def run_job(job: TrainingJob, trainer=train_with_mmdet) -> TrainingJob:
         update(job, work_dir=str(work_dir), train_images=data.train_images,
                val_images=data.val_images, class_names=data.classes)
 
+        if job.base_job_id:
+            # Retraining: start from the earlier model's own weights instead of the COCO ones.
+            base = job.base_job
+            if base is None or not base.checkpoint or not Path(base.checkpoint).is_file():
+                raise FileNotFoundError("The model selected for retraining no longer has its trained weights.")
+            load_from = base.checkpoint
+        else:
+            load_from = ARCHITECTURES[job.architecture].weights if job.use_pretrained else None
+
         cfg_settings = TrainSettings(
             work_dir=work_dir,
             data_root=Path(settings.MEDIA_ROOT),
@@ -156,7 +165,7 @@ def run_job(job: TrainingJob, trainer=train_with_mmdet) -> TrainingJob:
             epochs=job.epochs,
             batch_size=job.batch_size,
             seed=job.seed,
-            load_from=ARCHITECTURES[job.architecture].weights if job.use_pretrained else None,
+            load_from=load_from,
         )
         reporter = ProgressReporter(job, settings.TRAINING["PROGRESS_SECONDS"])
         checkpoint = trainer(job, cfg_settings, reporter)

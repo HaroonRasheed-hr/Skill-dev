@@ -31,6 +31,8 @@ class TrainingJob(models.Model):
     epochs = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(300)])
     batch_size = models.PositiveSmallIntegerField(validators=[MinValueValidator(1), MaxValueValidator(16)])
     use_pretrained = models.BooleanField(default=True)
+    # A completed job of the same project whose trained weights this run starts from (retraining).
+    base_job = models.ForeignKey("self", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
     seed = models.PositiveIntegerField(default=42)
 
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.QUEUED)

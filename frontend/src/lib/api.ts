@@ -140,7 +140,7 @@ export function useProject(): Project | null | undefined {
 
 export type ApiTrainingJob = {
   id: number; name: string; architecture: string; architecture_label: string; train_split: number;
-  epochs: number; batch_size: number; use_pretrained: boolean;
+  epochs: number; batch_size: number; use_pretrained: boolean; base_job: number | null; base_job_name: string | null;
   status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'; cancel_requested: boolean;
   progress: number; current_epoch: number; train_images: number; val_images: number; class_names: string[];
   metrics: Record<string, number>; history: Record<string, number | null>[]; error: string;

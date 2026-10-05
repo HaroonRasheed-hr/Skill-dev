@@ -59,7 +59,7 @@ class TrainingJobListView(ProjectScopedView):
 
     def post(self, request, project_id):
         project = self.get_project()
-        payload = TrainingJobCreateSerializer(data=request.data)
+        payload = TrainingJobCreateSerializer(data=request.data, project=project)
         payload.is_valid(raise_exception=True)
 
         if dataset_summary(project)["usable_images"] == 0:
@@ -83,6 +83,9 @@ class TrainingJobDetailView(ProjectScopedView):
         job = self.get_job()
         if job.is_active:
             return Response({"detail": "Cancel the job before deleting it."}, status=status.HTTP_409_CONFLICT)
+        if TrainingJob.objects.filter(base_job=job, status__in=TrainingJob.ACTIVE).exists():
+            return Response({"detail": "A training job is retraining this model. Wait for it to finish."},
+                            status=status.HTTP_409_CONFLICT)
         work_dir = job.work_dir
         job.delete()
         if work_dir:

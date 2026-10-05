@@ -107,6 +107,28 @@ class CreateJobTests(TrainingApiTestCase):
         self.assertEqual([j["id"] for j in self.client.get(self.url("job-list")).data], [new["id"], old.id])
 
 
+    def test_retrain_from_completed_model(self):
+        base = self.make_job(name="base", status=S.COMPLETED, architecture="ssdlite_mobilenetv2",
+                             checkpoint="/runs/best.pth")
+        res = self.start(name="v2", base_job=base.id, architecture="faster_rcnn_r50")
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.data)
+        # The architecture always follows the model being retrained.
+        self.assertEqual((res.data["base_job"], res.data["base_job_name"], res.data["architecture"]),
+                         (base.id, "base", "ssdlite_mobilenetv2"))
+
+    def test_retrain_needs_a_completed_model_of_this_project(self):
+        other = project_with_images(self.user, annotated=1, plain=0)
+        for kw in [{"status": S.FAILED, "checkpoint": "/runs/x.pth"}, {"status": S.COMPLETED},
+                   {"status": S.COMPLETED, "checkpoint": "/runs/x.pth", "project": other}]:
+            with self.subTest(kw=kw):
+                project = kw.pop("project", self.project)
+                job = TrainingJob.objects.create(project=project, created_by=self.user, name="b", train_split=70,
+                                                 epochs=1, batch_size=1, **kw)
+                res = self.start(base_job=job.id)
+                self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+                self.assertIn("base_job", res.data)
+
+
 class JobActionTests(TrainingApiTestCase):
     def test_detail(self):
         job = self.make_job()
@@ -144,6 +166,12 @@ class JobActionTests(TrainingApiTestCase):
     def test_cannot_delete_active_job(self):
         job = self.make_job(status=S.RUNNING)
         self.assertEqual(self.client.delete(self.url("job-detail", job_id=job.id)).status_code, 409)
+
+    def test_cannot_delete_model_being_retrained(self):
+        base = self.make_job(status=S.COMPLETED, checkpoint="/runs/best.pth")
+        self.make_job(name="v2", status=S.RUNNING, base_job=base)
+        res = self.client.delete(self.url("job-detail", job_id=base.id))
+        self.assertEqual(res.status_code, status.HTTP_409_CONFLICT)
 
     def test_download_checkpoint(self):
         ckpt = Path(self._tmp) / "runs" / "dl" / "best.pth"
