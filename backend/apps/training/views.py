@@ -122,6 +122,15 @@ class TrainingJobCheckpointView(ProjectScopedView):
 _detectors = {}  # checkpoint path -> loaded model, so each request doesn't reload the weights
 
 
+def _iou(a, b):
+    """Intersection over union of two [x1, y1, x2, y2] boxes."""
+    w = min(a[2], b[2]) - max(a[0], b[0])
+    h = min(a[3], b[3]) - max(a[1], b[1])
+    inter = max(w, 0) * max(h, 0)
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / union if union > 0 else 0.0
+
+
 class TrainingJobInferView(ProjectScopedView):
     """Run a completed job's model on one uploaded image and return the detections."""
 
@@ -159,12 +168,27 @@ class TrainingJobInferView(ProjectScopedView):
             _detectors[key] = init_detector(cfg, key, device="cpu")
         result = inference_detector(_detectors[key], image).pred_instances
 
-        threshold = 0.3
+        threshold, fallback_threshold = 0.3, 0.1
         names = job.class_names or []
+        found = list(zip(result.bboxes.tolist(), result.scores.tolist(), result.labels.tolist()))
+        kept = [d for d in found if d[1] >= threshold]
+        if not kept:
+            # Models trained on small datasets are rarely confident; show each class's best guess instead.
+            best = {}
+            for d in found:
+                if d[1] >= fallback_threshold and (d[2] not in best or d[1] > best[d[2]][1]):
+                    best[d[2]] = d
+            kept = list(best.values())
+        # mmdet suppresses overlaps per class only, so one region can come back once per class;
+        # keep just its highest-scoring label.
+        unique = []
+        for d in sorted(kept, key=lambda d: -d[1]):
+            if all(_iou(d[0], u[0]) < 0.7 for u in unique):
+                unique.append(d)
+        kept = unique
         detections = [
             {"box": [round(float(v), 1) for v in box], "score": round(float(score), 3),
              "label": names[int(label)] if int(label) < len(names) else str(int(label))}
-            for box, score, label in zip(result.bboxes.tolist(), result.scores.tolist(), result.labels.tolist())
-            if score >= threshold
+            for box, score, label in kept
         ]
         return Response({"detections": detections})
