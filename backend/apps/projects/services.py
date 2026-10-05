@@ -1,6 +1,8 @@
 """Project creation: validates the upload, then writes everything in one transaction."""
 import io
+import os
 import random
+import tempfile
 from contextlib import ExitStack
 from pathlib import PurePosixPath
 
@@ -87,6 +89,22 @@ def create_project(*, owner, name, description="", color="#1DB4FF", labels=(), d
     stored = []
     with ExitStack() as stack:
         images, videos, parsed = read_dataset(dataset, stack) if dataset else ([], [], None)
+
+        # Decode videos to a temp folder before the transaction: SQLite stays write-locked
+        # while it is open, so slow decoding in there would block every other request.
+        frame_dir = stack.enter_context(tempfile.TemporaryDirectory())
+
+        def decode(n, name, source):
+            frames = []
+            for frame in extract_frames(source, name, video_fps):
+                path = os.path.join(frame_dir, f"{n}_{frame.index}.jpg")
+                with open(path, "wb") as out:
+                    out.write(frame.data)
+                frames.append((frame, path))
+            return frames
+
+        dataset_clips = [decode(n, e.path, e.read()) for n, e in enumerate(videos)]
+        media_clips = {i: decode(len(videos) + i, u.name, u) for i, u in enumerate(media) if is_video(u.name)}
         try:
             with transaction.atomic():
                 project = Project.objects.create(
@@ -109,14 +127,16 @@ def create_project(*, owner, name, description="", color="#1DB4FF", labels=(), d
 
                 # Each frame is saved as an image, tagged with its video so the page can play them back
                 video_names = set()
-                def save_video(video_name, source):
+                def save_video(video_name, frames):
                     key, n = video_name[:240], 2
                     while key in video_names:  # two videos with the same name stay apart
                         key, n = f"{video_name[:240]} ({n})", n + 1
                     video_names.add(key)
                     stem = PurePosixPath(video_name).stem
-                    for frame in extract_frames(source, video_name, video_fps):
-                        save_image(f"{stem}_frame_{frame.index:06d}.jpg", ContentFile(frame.data, name="frame.jpg"),
+                    for frame, path in frames:
+                        with open(path, "rb") as f:
+                            content = ContentFile(f.read(), name="frame.jpg")
+                        save_image(f"{stem}_frame_{frame.index:06d}.jpg", content,
                                    video=key, frame_index=frame.index, frame_time=frame.time)
 
                 annotations = []
@@ -127,11 +147,11 @@ def create_project(*, owner, name, description="", color="#1DB4FF", labels=(), d
                                    points=s.points, source=Annotation.Source.IMPORTED)
                         for s in parsed.annotations.get(entry.path, [])
                     ]
-                for entry in videos:
-                    save_video(entry.path, entry.read())
-                for upload in media:
-                    if is_video(upload.name):
-                        save_video(upload.name, upload)
+                for entry, frames in zip(videos, dataset_clips):
+                    save_video(entry.path, frames)
+                for i, upload in enumerate(media):
+                    if i in media_clips:
+                        save_video(upload.name, media_clips[i])
                     else:
                         save_image(upload.name, upload)
                 Annotation.objects.bulk_create(annotations, batch_size=1000)
