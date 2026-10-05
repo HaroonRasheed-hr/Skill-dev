@@ -180,13 +180,13 @@ def import_into_project(*, project, dataset):
             raise DatasetError("No images found. The dataset must contain images and their annotations.")
         try:
             with transaction.atomic():
-                existing = list(project.labels.all())
+                existing = list(Label.objects.filter(project=project))  # not the possibly prefetched project.labels
                 known = {lbl.name.lower() for lbl in existing}
                 merged = merge_labels([{"name": lbl.name, "color": lbl.color} for lbl in existing], parsed.classes)
                 Label.objects.bulk_create(
                     Label(project=project, **item) for item in merged if item["name"].lower() not in known
                 )
-                by_label = {lbl.name.lower(): lbl for lbl in project.labels.all()}
+                by_label = {lbl.name.lower(): lbl for lbl in Label.objects.filter(project=project)}
 
                 annotations = []
                 for entry in images:
