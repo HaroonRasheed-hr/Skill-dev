@@ -132,14 +132,17 @@ def apply_settings(cfg, s: TrainSettings):
 
     # Short schedule: brief warm-up, then cosine decay across the requested epochs.
     cfg["param_scheduler"] = [
-        {"type": "LinearLR", "start_factor": 0.001, "by_epoch": False, "begin": 0, "end": 200},
+        # Warm up over the first epoch: a fixed 200 iterations outlasts small runs entirely.
+        {"type": "LinearLR", "start_factor": 0.001, "by_epoch": True, "begin": 0, "end": 1,
+         "convert_to_iter_based": True},
         {"type": "CosineAnnealingLR", "by_epoch": True, "begin": 0, "end": s.epochs, "T_max": s.epochs,
          "eta_min": 0.0, "convert_to_iter_based": True},
     ]
     # The bundled learning rates assume 8 GPUs; scale them to our single CPU batch.
     auto = dict(cfg.get("auto_scale_lr") or {})
     auto["enable"] = True
-    auto.setdefault("base_batch_size", 16)
+    # Cap the base at 16: RTMDet's 256 would shrink the LR ~100x and the model barely learns.
+    auto["base_batch_size"] = min(auto.get("base_batch_size") or 16, 16)
     cfg["auto_scale_lr"] = auto
 
     cfg["custom_hooks"] = [h for h in cfg.get("custom_hooks") or [] if h.get("type") not in DROP_HOOKS]

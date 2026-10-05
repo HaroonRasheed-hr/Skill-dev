@@ -70,7 +70,7 @@ class ApplySettingsTests(SimpleTestCase):
         self.assertEqual([h["type"] for h in cfg["custom_hooks"]], ["EMAHook"])
         self.assertNotIn("visualization", cfg["default_hooks"])
         self.assertEqual(cfg["default_hooks"]["checkpoint"]["save_best"], "coco/bbox_mAP")
-        self.assertEqual(cfg["auto_scale_lr"], {"enable": True, "base_batch_size": 256})
+        self.assertEqual(cfg["auto_scale_lr"], {"enable": True, "base_batch_size": 16})
         self.assertEqual(cfg["param_scheduler"][-1]["end"], 5)
         self.assertEqual(cfg["launcher"], "none")
         self.assertEqual(cfg["randomness"]["seed"], 7)
