@@ -5,13 +5,15 @@ export type DatasetEntry = { path: string; text: () => Promise<string> };
 /** An imported shape. Points are 0–1 fractions of the image when `norm`, otherwise image pixels. */
 export type DatasetShape = { label: string; kind: 'rect' | 'polygon'; pts: [number, number][]; norm: boolean };
 
+// format is null for a dataset of videos only (their frames are annotated after import)
 export type DatasetCheck =
-  | { ok: true; format: DatasetFormat; images: DatasetEntry[]; annotated: number; classes: string[]; shapes: Record<string, DatasetShape[]> }
+  | { ok: true; format: DatasetFormat | null; images: DatasetEntry[]; videos: DatasetEntry[]; annotated: number; classes: string[]; shapes: Record<string, DatasetShape[]> }
   | { ok: false; error: string };
 
 type Found = { classes: string[]; shapes: Record<string, DatasetShape[]> } | null;
 
 const imageExt = /\.(jpe?g|png|bmp|webp|gif|tiff?)$/i;
+export const videoExt = /\.(mp4|webm|mov|avi|mkv|m4v|ogv|ogg|mpe?g)$/i;
 const stem = (p: string) => p.split('/').pop()!.replace(/\.[^.]+$/, '').toLowerCase();
 const base = (p: string) => p.split('/').pop()!.toLowerCase();
 const ignored = (p: string) => p.startsWith('__MACOSX/') || base(p).startsWith('.');
@@ -137,11 +139,13 @@ function parseYamlNames(src: string): string[] {
     .map((l) => l.replace(/^-\s*/, '').replace(/^\d+\s*:\s*/, '').replace(/^['"]|['"]$/g, ''));
 }
 
-/** Accepts only datasets that contain images plus annotations in a known format. */
+/** Accepts datasets that contain images plus annotations in a known format, and/or videos. */
 export async function checkDataset(entries: DatasetEntry[]): Promise<DatasetCheck> {
   const files = entries.filter((e) => !ignored(e.path));
   const images = files.filter((e) => imageExt.test(e.path));
-  if (!images.length) return { ok: false, error: 'No images found. The dataset must contain images and their annotations.' };
+  const videos = files.filter((e) => videoExt.test(e.path));
+  if (!images.length && !videos.length) return { ok: false, error: 'No images found. The dataset must contain images and their annotations, or videos.' };
+  if (!images.length) return { ok: true, format: null, images, videos, annotated: 0, classes: [], shapes: {} };
 
   // First image wins when names repeat across folders
   const byName = new Map<string, string>(), byStem = new Map<string, string>();
@@ -160,7 +164,7 @@ export async function checkDataset(entries: DatasetEntry[]): Promise<DatasetChec
   ];
   for (const [format, detect] of detectors) {
     const found = await detect();
-    if (found) return { ok: true, format, images, annotated: Object.keys(found.shapes).length, ...found };
+    if (found) return { ok: true, format, images, videos, annotated: Object.keys(found.shapes).length, ...found };
   }
   return { ok: false, error: 'No annotations found for these images. Supported formats: YOLO, COCO, Pascal VOC, CreateML.' };
 }

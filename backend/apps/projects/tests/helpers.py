@@ -63,3 +63,24 @@ def createml_files():
         {"label": "bird", "coordinates": {"x": 50, "y": 25, "width": 20, "height": 10}},
     ]}]
     return {"m.png": png_bytes(), "annotations.json": json.dumps(data)}
+
+
+def video_bytes(frames=20, fps=10, width=64, height=48):
+    """A small MJPEG .avi, which OpenCV can always write and read back."""
+    import os
+    import tempfile
+
+    import cv2
+    import numpy as np
+
+    fd, path = tempfile.mkstemp(suffix=".avi")
+    os.close(fd)
+    try:
+        writer = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*"MJPG"), fps, (width, height))
+        for i in range(frames):
+            writer.write(np.full((height, width, 3), i * 10 % 255, dtype=np.uint8))
+        writer.release()
+        with open(path, "rb") as f:
+            return f.read()
+    finally:
+        os.remove(path)

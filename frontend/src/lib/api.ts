@@ -66,7 +66,11 @@ export type ApiProject = {
   annotated_count: number; is_labeled: boolean; created_at: string; updated_at: string;
 };
 export type ApiAnnotation = { id?: number; label: number; kind: string; points: [number, number][]; source?: string };
-export type ApiImage = { id: number; url: string; original_name: string; width: number; height: number; annotations: ApiAnnotation[] };
+// video / frame_index / frame_time are set when the image is a frame extracted from a video
+export type ApiImage = {
+  id: number; url: string; original_name: string; width: number; height: number;
+  video: string; frame_index: number | null; frame_time: number | null; annotations: ApiAnnotation[];
+};
 
 function timeAgo(iso: string) {
   const s = (Date.now() - new Date(iso).getTime()) / 1000;

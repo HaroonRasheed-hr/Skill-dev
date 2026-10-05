@@ -10,7 +10,7 @@ const swatches = ['#FF5A5F', '#4FD1FF', '#3B6CFF'];
 const steps = ['Project Info', 'Dataset Definition', 'Review & Create'];
 
 type Media = { file: File; url: string };
-type Dataset = { kind: 'zip' | 'folder'; name: string; files: File[]; previews: Media[]; loading?: boolean; format?: DatasetFormat; annotated?: number };
+type Dataset = { kind: 'zip' | 'folder'; name: string; files: File[]; previews: Media[]; loading?: boolean; format?: DatasetFormat | null; annotated?: number };
 // What gets written to IndexedDB so an unfinished project survives a refresh
 type StoredMedia = Omit<Media, 'url'>;
 type StoredDraft = { media: StoredMedia[]; dataset: (Omit<Dataset, 'previews'> & { previews?: StoredMedia[] }) | null; thumb: number };
@@ -19,16 +19,20 @@ const DRAFT = 'create-project';
 const mediaTypes: Record<string, string> = {
   jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml',
   mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', ogg: 'video/ogg',
+  ogv: 'video/ogg', m4v: 'video/mp4', avi: 'video/x-msvideo', mkv: 'video/x-matroska', mpeg: 'video/mpeg', mpg: 'video/mpeg',
 };
+// Frames per second the backend extracts from each video; 0 keeps every frame
+const fpsOptions: [number, string][] = [[1, '1 fps'], [2, '2 fps'], [5, '5 fps'], [10, '10 fps'], [15, '15 fps'], [30, '30 fps'], [0, 'Every frame']];
+const isVideo = (m: Media) => m.file.type.startsWith('video');
 const mediaType = (path: string) => mediaTypes[path.split('.').pop()?.toLowerCase() ?? ''];
 const toMedia = (file: File): Media => ({ file, url: URL.createObjectURL(file) });
 
-// Checks the dataset has images + annotations, then turns its images into previews
+// Checks the dataset has images + annotations (and/or videos), then turns them into previews
 async function loadDataset(entries: (DatasetEntry & { blob: () => Promise<Blob> })[]) {
   const check = await checkDataset(entries);
   if (!check.ok) return check;
   const byPath = new Map(entries.map((e) => [e.path, e]));
-  const previews = await Promise.all(check.images.map(async (img) =>
+  const previews = await Promise.all([...check.images, ...check.videos].map(async (img) =>
     toMedia(new File([await byPath.get(img.path)!.blob()], img.path.split('/').pop()!, { type: mediaType(img.path) }))));
   return { ...check, previews };
 }
@@ -210,6 +214,7 @@ export default function CreateProject() {
   const [name, setName] = usePersistentState(`${DRAFT}:name`, '');
   const [description, setDescription] = usePersistentState(`${DRAFT}:description`, '');
   const [color, setColor] = usePersistentState(`${DRAFT}:color`, '#1DB4FF');
+  const [videoFps, setVideoFps] = usePersistentState(`${DRAFT}:videoFps`, 5);
   const [media, setMedia] = useState<Media[]>([]);
   const [dataset, setDataset] = useState<Dataset | null>(null);
   const [datasetMenu, setDatasetMenu] = useState(false);
@@ -257,6 +262,7 @@ export default function CreateProject() {
   };
   const allMedia = [...media, ...(dataset?.previews ?? [])];
   const thumbnail = allMedia.find((m) => m.url === thumbnailUrl) ?? allMedia[0];
+  const hasVideo = allMedia.some(isVideo);
   const removeMedia = (m: Media) => {
     URL.revokeObjectURL(m.url);
     setMedia((list) => list.filter((x) => x !== m));
@@ -333,7 +339,8 @@ export default function CreateProject() {
       form.append('color', color);
       form.append('labels', JSON.stringify(labels.map((l) => ({ name: l.name, color: l.color }))));
       if (dataset) form.append('dataset', dataset.kind === 'zip' ? dataset.files[0] : await folderZip(dataset.files, dataset.name));
-      media.filter((m) => m.file.type.startsWith('image')).forEach((m) => form.append('media', m.file));
+      media.forEach((m) => form.append('media', m.file));
+      if (hasVideo) form.append('video_fps', String(videoFps));
       const created = await api<ApiProject>('/projects/', { method: 'POST', body: form });
       cacheProject(toProject(created));
       clearStored(DRAFT);
@@ -419,7 +426,7 @@ export default function CreateProject() {
               {dataset && (
                 <span className="flex items-center gap-2 rounded-full border border-line px-3 py-1 text-xs text-muted">
                   {dataset.kind === 'zip' ? <FileArchive className="h-3.5 w-3.5" /> : <Folder className="h-3.5 w-3.5" />}
-                  <span className="max-w-48 truncate text-ink">{dataset.name}</span> · {dataset.loading ? 'Checking…' : <><span className="text-brand-500">{dataset.format}</span> · {dataset.annotated} annotated · {datasetSummary(dataset)}</>}
+                  <span className="max-w-48 truncate text-ink">{dataset.name}</span> · {dataset.loading ? 'Checking…' : <><span className="text-brand-500">{dataset.format ?? 'Video'}</span> · {dataset.annotated} annotated · {datasetSummary(dataset)}</>}
                   <button onClick={() => replaceDataset(null)} className="hover:text-ink"><X className="h-3.5 w-3.5" /></button>
                 </span>
               )}
@@ -454,6 +461,15 @@ export default function CreateProject() {
                 )}
               </div>
               <p className="mt-3 text-sm text-muted">{allMedia.length} file{allMedia.length !== 1 && 's'}{dataset ? ' in dataset' : ''}</p>
+              {hasVideo && (
+                <label className="mt-4 flex flex-wrap items-center gap-3 text-sm">
+                  <span className="font-semibold">Video frame rate</span>
+                  <select value={videoFps} onChange={(e) => setVideoFps(+e.target.value)} className="input w-36 py-1.5">
+                    {fpsOptions.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+                  </select>
+                  <span className="text-muted">Videos are split into frames at this rate for frame-by-frame annotation.</span>
+                </label>
+              )}
             </>
           )}
 
@@ -512,7 +528,8 @@ export default function CreateProject() {
                 {allMedia.length > 1 && <p className="mt-2 text-xs text-muted">+{allMedia.length - 1} more file{allMedia.length > 2 && 's'}</p>}
               </dd>
             </>)}
-            {dataset && (<><dt className="text-muted">Dataset</dt><dd><span className="font-semibold">{dataset.name}</span> <span className="text-xs text-muted">({dataset.kind === 'zip' ? 'ZIP' : 'Folder'} · {dataset.format} · {dataset.annotated} annotated images · {datasetSummary(dataset)})</span></dd></>)}
+            {dataset && (<><dt className="text-muted">Dataset</dt><dd><span className="font-semibold">{dataset.name}</span> <span className="text-xs text-muted">({dataset.kind === 'zip' ? 'ZIP' : 'Folder'} · {dataset.format ?? 'Video'} · {dataset.annotated} annotated images · {datasetSummary(dataset)})</span></dd></>)}
+            {hasVideo && (<><dt className="text-muted">Video frame rate</dt><dd className="font-semibold">{fpsOptions.find(([v]) => v === videoFps)?.[1] ?? `${videoFps} fps`}</dd></>)}
           </dl>
         </>
       )}

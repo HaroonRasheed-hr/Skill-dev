@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronDown, ChevronLeft, ChevronRight, Circle, Eye, EyeOff, Filter, Hand, Info, ListTree, Lock, LockOpen, Maximize,
   Menu, Minus, Pentagon, Plus, Redo2, RotateCcw, Save, ScanSearch, Spline, Square, SquareDashed,
   Grip, Trash2, Undo2, Wand2, ImageIcon,
+  ChevronsLeft, ChevronsRight, ClipboardPaste, Copy, Film, Pause, Play, SkipBack, SkipForward, StepBack, StepForward,
 } from 'lucide-react';
 import { Empty } from '../components/ui';
 import { useProject } from './ProjectDetail';
@@ -22,6 +23,8 @@ const fit = (img: ApiImage) => {
   return { k, ox: (W - img.width * k) / 2, oy: (H - img.height * k) / 2 };
 };
 const demo = (id: number) => Array.from({ length: 6 }, (_, i) => `https://picsum.photos/seed/p${id}-${i}/1000/625`);
+// Seconds as m:ss.s for the video timeline
+const clock = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
 
 // Hover card for each rail tool: what it does and its shortcut
 const toolHelp: Record<string, [string, string, string?]> = {
@@ -112,6 +115,15 @@ export default function ProjectAnnotation() {
   // Last saved payload per image, to only send images that changed
   const savedPayload = useRef(new Map<number, string>());
   const [saveError, setSaveError] = useState('');
+  const [playing, setPlaying] = useState(false);
+
+  // When the current image is a video frame: the indexes of all frames of that video, in order
+  const video = stored?.[index]?.video;
+  const clip = useMemo(() => (video && stored ? stored.flatMap((img, i) => (img.video === video ? [i] : [])) : []), [stored, video]);
+  const pos = clip.indexOf(index);
+  const times = clip.map((i) => stored?.[i]?.frame_time ?? 0);
+  const span = times.length > 1 ? times[times.length - 1] - times[0] : 0;
+  const clipFps = span > 0 ? (clip.length - 1) / span : 5;
 
   // Load the project's images and saved annotations from the backend (points are image pixels)
   const projectId = p?.id;
@@ -190,6 +202,7 @@ export default function ProjectAnnotation() {
 
   const color = (name: string) => labels.find((l) => l.name === name)?.color ?? '#999';
   const onImage = shapes.filter((s) => s.image === index);
+  const annotated = new Set(shapes.map((s) => s.image));
   const listed = [...onImage].sort((a, b) => sort === 'label' ? a.label.localeCompare(b.label) : sort === 'asc' ? a.id - b.id : b.id - a.id);
 
   function commit(next: Shape[]) {
@@ -203,6 +216,30 @@ export default function ProjectAnnotation() {
   const update = (id: number, patch: Partial<Shape>) => commit(shapes.map((s) => (s.id === id ? { ...s, ...patch } : s)));
   const resetView = () => { setZoom(1); setPan({ x: 0, y: 0 }); };
   const go = (i: number) => { setDraft(null); setActive(null); setIndex(Math.max(0, Math.min(images.length - 1, i))); };
+  const goFrame = (n: number) => { if (clip.length) go(clip[Math.max(0, Math.min(clip.length - 1, n))]); };
+
+  // Copies every shape of image `from` onto image `to` as new shapes (frames of a video share one size)
+  function copyShapes(from: number, to: number) {
+    const src = shapes.filter((s) => s.image === from);
+    if (!src.length) return;
+    let id = Math.max(0, ...shapes.map((s) => s.id));
+    commit([...shapes, ...src.map((s) => ({ ...s, id: ++id, image: to, hidden: false, locked: false, dbId: undefined }))]);
+  }
+  const copyFromPrev = () => { if (pos > 0) copyShapes(clip[pos - 1], index); };
+  const copyToNext = () => { if (pos < 0 || pos >= clip.length - 1) return; copyShapes(index, clip[pos + 1]); goFrame(pos + 1); };
+
+  // Playback: step through the video's frames at the rate they were extracted
+  useEffect(() => {
+    if (!playing) return;
+    if (pos < 0 || pos >= clip.length - 1) { setPlaying(false); return; }
+    const t = setTimeout(() => setIndex(clip[pos + 1]), 1000 / clipFps);
+    return () => clearTimeout(t);
+  }, [playing, index, clip]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Preload the next frames so stepping and playback don't flash
+  useEffect(() => {
+    clip.slice(pos + 1, pos + 4).forEach((i) => { new Image().src = images[i]; });
+  }, [index, clip]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function add(kind: Kind, pts: Pt[], name = label) {
     const id = Math.max(0, ...shapes.map((s) => s.id)) + 1;
@@ -243,7 +280,8 @@ export default function ProjectAnnotation() {
         return;
       }
       if ((e.target as HTMLElement).closest('input, select, textarea')) return;
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); finish(); }
+      if (e.key === ' ' && !draft && clip.length) { e.preventDefault(); setPlaying((x) => !x); }
+      else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); finish(); }
       else if (e.key === 'Escape') setDraft(null);
       else if (e.key === '+' || e.key === '=') setZoom((z) => Math.min(8, z * 1.25));
       else if (e.key === '-') setZoom((z) => Math.max(0.2, z / 1.25));
@@ -251,6 +289,11 @@ export default function ProjectAnnotation() {
       else if (e.key === 'Backspace' && draft) setDraft(draft.length > 1 ? draft.slice(0, -1) : null);
       else if (e.ctrlKey && e.key === 'z') undo();
       else if (e.ctrlKey && e.key === 'y') redo();
+      else if (clip.length && e.shiftKey && e.key === 'ArrowRight') goFrame(pos + 10);
+      else if (clip.length && e.shiftKey && e.key === 'ArrowLeft') goFrame(pos - 10);
+      else if (clip.length && e.key === 'Home') goFrame(0);
+      else if (clip.length && e.key === 'End') goFrame(clip.length - 1);
+      else if (clip.length && !e.ctrlKey && e.key.toLowerCase() === 'c') copyFromPrev();
       else if (e.key === 'd' || e.key === 'ArrowRight') go(index + 1);
       else if (e.key === 'a' || e.key === 'ArrowLeft') go(index - 1);
       else if (e.key === 'Delete' && active != null) commit(shapes.filter((s) => s.id !== active || s.locked));
@@ -265,6 +308,7 @@ export default function ProjectAnnotation() {
   }
   function onDown(e: React.MouseEvent) {
     if (e.button !== 0 || pending) return;
+    setPlaying(false);
     if (tool === 'pan' || tool === 'select' || tool === 'ai') {
       if (tool === 'select') setActive(null);
       drag.current = { start: { x: e.clientX, y: e.clientY }, pan };
@@ -364,8 +408,9 @@ export default function ProjectAnnotation() {
         </div>
 
         <div className="flex min-h-0 flex-1 gap-2 2xl:gap-3">
+          <div className="flex min-w-0 flex-1 flex-col gap-2 2xl:gap-3">
           {/* Canvas */}
-          <section ref={canvasRef} className="relative min-w-0 flex-1 overflow-hidden rounded-lg bg-page" onWheel={onWheel}>
+          <section ref={canvasRef} className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg bg-page" onWheel={onWheel}>
             {drawing && (
               <div className="absolute left-2 right-12 top-2 z-10 flex w-fit max-w-[calc(100%-3.5rem)] items-center gap-2 rounded-lg bg-panel-2/95 p-1.5 text-sm shadow">
                 <span className="h-3 w-3 rounded" style={{ background: color(label) }} />
@@ -431,6 +476,33 @@ export default function ProjectAnnotation() {
               <button onClick={() => setShowSettings(!showSettings)} className="flex items-center gap-2 rounded-t-lg bg-panel-2 px-4 py-2 text-sm font-semibold">Image settings</button>
             </div>
           </section>
+
+          {/* Video timeline: frame-by-frame navigation for images extracted from a video */}
+          {clip.length > 0 && (
+            <div className="flex shrink-0 items-center gap-1 rounded-lg border border-line bg-panel-2 px-1.5 py-1.5">
+              <span className="flex max-w-36 shrink-0 items-center gap-1.5 px-1 text-xs text-muted" title={video}><Film className="h-4 w-4 shrink-0" /><span className="hidden truncate 2xl:block">{video}</span></span>
+              <BarBtn icon={SkipBack} text="First (Home)" onClick={() => goFrame(0)} disabled={pos === 0} />
+              <BarBtn icon={ChevronsLeft} text="Back 10 (Shift+Left)" onClick={() => goFrame(pos - 10)} disabled={pos === 0} />
+              <BarBtn icon={StepBack} text="Prev frame (A)" onClick={() => goFrame(pos - 1)} disabled={pos === 0} />
+              <BarBtn icon={playing ? Pause : Play} text={playing ? 'Pause (Space)' : 'Play (Space)'} onClick={() => setPlaying(!playing)} disabled={!playing && pos === clip.length - 1} />
+              <BarBtn icon={StepForward} text="Next frame (D)" onClick={() => goFrame(pos + 1)} disabled={pos === clip.length - 1} />
+              <BarBtn icon={ChevronsRight} text="Forward 10 (Shift+Right)" onClick={() => goFrame(pos + 10)} disabled={pos === clip.length - 1} />
+              <BarBtn icon={SkipForward} text="Last (End)" onClick={() => goFrame(clip.length - 1)} disabled={pos === clip.length - 1} />
+              <div className="relative mx-2 min-w-24 flex-1">
+                {/* Marks frames that already have annotations */}
+                <div className="pointer-events-none absolute inset-x-2 -top-1.5 h-1.5">
+                  {clip.map((i, n) => annotated.has(i) && <span key={i} className="absolute h-1.5 w-0.5 -translate-x-1/2 rounded-full bg-brand-500" style={{ left: `${clip.length > 1 ? (n / (clip.length - 1)) * 100 : 0}%` }} />)}
+                </div>
+                <input type="range" min={0} max={clip.length - 1} value={pos} onChange={(e) => goFrame(+e.target.value)} className="w-full accent-brand-500" title="Scrub through the video's frames" />
+              </div>
+              <span className="shrink-0 whitespace-nowrap px-1 text-xs font-semibold tabular-nums">
+                {pos + 1} / {clip.length}<span className="ml-2 font-normal text-muted">{clock(times[pos] ?? 0)}</span>
+              </span>
+              <BarBtn icon={ClipboardPaste} text="Copy from prev (C)" onClick={copyFromPrev} disabled={pos === 0 || !annotated.has(clip[pos - 1])} />
+              <BarBtn icon={Copy} text="Copy to next" onClick={copyToNext} disabled={pos === clip.length - 1 || !onImage.length} />
+            </div>
+          )}
+          </div>
 
           {/* Right panel */}
           {showPanel ? (

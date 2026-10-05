@@ -61,6 +61,10 @@ class Image(models.Model):
     original_name = models.CharField(max_length=255)
     width = models.PositiveIntegerField()
     height = models.PositiveIntegerField()
+    # Set when the image is a frame extracted from an uploaded video
+    video = models.CharField(max_length=255, blank=True)
+    frame_index = models.PositiveIntegerField(null=True, blank=True)
+    frame_time = models.FloatField(null=True, blank=True)  # seconds from the video's start
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

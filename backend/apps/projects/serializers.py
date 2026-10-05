@@ -4,6 +4,7 @@ from django.conf import settings
 from rest_framework import serializers
 
 from .models import Annotation, Image, Label, Project, hex_color
+from .videos import DEFAULT_FPS, is_video
 
 
 class LabelSerializer(serializers.ModelSerializer):
@@ -48,14 +49,16 @@ class ProjectSerializer(serializers.ModelSerializer):
 
 
 class ProjectCreateSerializer(serializers.Serializer):
-    """Multipart payload: plain fields, ``labels`` as a JSON string, a dataset ZIP and/or images."""
+    """Multipart payload: plain fields, ``labels`` as a JSON string, a dataset ZIP and/or images and videos."""
 
     name = serializers.CharField(max_length=120)
     description = serializers.CharField(required=False, allow_blank=True, default="")
     color = serializers.CharField(required=False, default="#1DB4FF", validators=[hex_color])
     labels = serializers.JSONField(required=False, binary=True, default=list)
     dataset = serializers.FileField(required=False)
-    media = serializers.ListField(child=serializers.ImageField(), required=False, default=list)
+    media = serializers.ListField(child=serializers.FileField(), required=False, default=list)
+    # Frames taken per second from each video; 0 keeps every frame
+    video_fps = serializers.FloatField(required=False, default=DEFAULT_FPS, min_value=0, max_value=60)
 
     def validate_name(self, value):
         value = value.strip()
@@ -75,6 +78,20 @@ class ProjectCreateSerializer(serializers.Serializer):
         if len(set(colors)) != len(colors):
             raise serializers.ValidationError("Each label needs its own color.")
         return items.validated_data
+
+    def validate_media(self, files):
+        """Videos are checked when their frames are extracted; everything else must be an image."""
+        image, errors = serializers.ImageField(), {}
+        for i, upload in enumerate(files):
+            if is_video(upload.name):
+                continue
+            try:
+                image.run_validation(upload)
+            except serializers.ValidationError as exc:
+                errors[i] = exc.detail
+        if errors:
+            raise serializers.ValidationError(errors)
+        return files
 
     def validate_dataset(self, value):
         if PurePosixPath(value.name).suffix.lower() != ".zip":
@@ -131,7 +148,7 @@ class ImageSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Image
-        fields = ("id", "url", "original_name", "width", "height", "annotations")
+        fields = ("id", "url", "original_name", "width", "height", "video", "frame_index", "frame_time", "annotations")
 
     def get_url(self, image):
         return _file_url(self.context.get("request"), image.file)

@@ -8,3 +8,4 @@ whitenoise>=6.7
 Pillow>=10.4
 PyYAML>=6.0
 defusedxml>=0.7
+opencv-python>=4.8

@@ -13,7 +13,7 @@ from rest_framework.test import APITestCase
 
 from apps.projects.models import Annotation, Image, Label, Project
 
-from .helpers import coco_files, make_zip, png_bytes, yolo_files
+from .helpers import coco_files, make_zip, png_bytes, video_bytes, yolo_files
 
 User = get_user_model()
 MEDIA_ROOT = tempfile.mkdtemp(prefix="skillwala-test-media-")
@@ -86,6 +86,33 @@ class CreateProjectTests(ProjectApiTestCase):
         self.assertEqual(res.data["image_count"], 2)
         self.assertEqual(res.data["dataset_format"], "")
         self.assertFalse(res.data["is_labeled"])
+
+    def test_uploaded_video_is_split_into_frames(self):
+        res = self.create(
+            media=[SimpleUploadedFile("clip.avi", video_bytes(frames=20, fps=10))],
+            labels=[{"name": "car", "color": "#FF5A5F"}], video_fps=5,
+        )
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.data)
+        frames = list(Image.objects.order_by("id"))
+        self.assertEqual(len(frames), 10)  # 2 s at 5 fps
+        self.assertEqual({f.video for f in frames}, {"clip.avi"})
+        self.assertEqual([f.frame_index for f in frames], list(range(10)))
+        self.assertAlmostEqual(frames[1].frame_time, 0.2)
+        self.assertEqual((frames[0].width, frames[0].height), (64, 48))
+
+    def test_zip_with_only_videos_is_accepted(self):
+        res = self.create(dataset=make_zip({"videos/a.avi": video_bytes(frames=6)}),
+                          labels=[{"name": "car", "color": "#FF5A5F"}], video_fps=0)
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.data)
+        self.assertEqual(res.data["image_count"], 6)
+        self.assertEqual(res.data["dataset_format"], "")
+
+    def test_unreadable_video_is_rejected(self):
+        res = self.create(media=[SimpleUploadedFile("clip.mp4", b"not a video")],
+                          labels=[{"name": "car", "color": "#FF5A5F"}])
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("could not be read as a video", res.data["dataset"][0])
+        self.assertFalse(Project.objects.exists())
 
     def test_zip_without_annotations_is_rejected_and_nothing_is_saved(self):
         res = self.create(dataset=make_zip({"a.png": png_bytes()}))
