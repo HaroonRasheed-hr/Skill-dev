@@ -2,11 +2,12 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { UploadCloud } from 'lucide-react';
 import { projects } from '../data/mock';
+import { usePersistentState } from '../lib/persist';
 
 export default function CreateTask() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState('My computer');
-  const [files, setFiles] = useState<string[]>([]);
+  const [tab, setTab] = usePersistentState('create-task:tab', 'My computer');
+  const [files, setFiles] = usePersistentState<string[]>('create-task:files', []);
 
   return (
     <div className="mx-auto max-w-2xl">

@@ -4,10 +4,11 @@ import { Plus } from 'lucide-react';
 import TaskRow from '../components/TaskRow';
 import { Empty, PageHeader } from '../components/ui';
 import { tasks } from '../data/mock';
+import { usePersistentState } from '../lib/persist';
 
 export default function Tasks() {
-  const [q, setQ] = useState('');
-  const [status, setStatus] = useState('all');
+  const [q, setQ] = usePersistentState('tasks:q', '');
+  const [status, setStatus] = usePersistentState('tasks:status', 'all');
   const list = tasks.filter((t) => t.name.toLowerCase().includes(q.toLowerCase()) && (status === 'all' || t.status === status));
 
   return (

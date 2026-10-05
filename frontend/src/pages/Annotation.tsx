@@ -5,6 +5,7 @@ import {
   MousePointer2, Pause, Play, Redo2, RotateCw, Save, Spline, Square, Trash2, Undo2, Wand2, ZoomIn, Pentagon, Dot,
 } from 'lucide-react';
 import { labels } from '../data/mock';
+import { usePersistentState } from '../lib/persist';
 
 type Shape = { id: number; frame: number; label: string; x: number; y: number; w: number; h: number; hidden: boolean; locked: boolean };
 type Tool = 'cursor' | 'move' | 'rect' | 'polygon' | 'polyline' | 'points' | 'ai';
@@ -17,16 +18,17 @@ const initial: Shape[] = [
 
 export default function Annotation() {
   const { taskId, jobId } = useParams();
-  const [frame, setFrame] = useState(0);
+  const key = `annotation:${taskId}:${jobId}`;
+  const [frame, setFrame] = usePersistentState(`${key}:frame`, 0);
   const [playing, setPlaying] = useState(false);
-  const [tool, setTool] = useState<Tool>('cursor');
-  const [label, setLabel] = useState(labels[0].name);
-  const [shapes, setShapes] = useState<Shape[]>(initial);
+  const [tool, setTool] = usePersistentState<Tool>(`${key}:tool`, 'cursor');
+  const [label, setLabel] = usePersistentState(`${key}:label`, labels[0].name);
+  const [shapes, setShapes] = usePersistentState<Shape[]>(`${key}:shapes`, initial);
   const [history, setHistory] = useState<Shape[][]>([]);
   const [future, setFuture] = useState<Shape[][]>([]);
   const [active, setActive] = useState<number | null>(null);
   const [draft, setDraft] = useState<{ x0: number; y0: number; x: number; y: number } | null>(null);
-  const [tab, setTab] = useState<'objects' | 'labels'>('objects');
+  const [tab, setTab] = usePersistentState<'objects' | 'labels'>(`${key}:tab`, 'objects');
   const [saved, setSaved] = useState(true);
   const svgRef = useRef<SVGSVGElement>(null);
   const timer = useRef<number | undefined>(undefined);

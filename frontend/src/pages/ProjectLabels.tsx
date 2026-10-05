@@ -4,15 +4,16 @@ import { ChevronRight, MoreVertical, Pencil, Tag, Trash2 } from 'lucide-react';
 import { Empty } from '../components/ui';
 import { jobs, tasks } from '../data/mock';
 import { useProject } from './ProjectDetail';
+import { usePersistentState } from '../lib/persist';
 
 const MAX_FRAMES = 6;
 
 export default function ProjectLabels() {
   const p = useProject();
-  const [list, setList] = useState(p?.labels ?? []);
+  const [list, setList] = usePersistentState(`labels:${p?.id}`, p?.labels ?? []);
   const [name, setName] = useState('');
   const [color, setColor] = useState('#00c2f0');
-  if (!p) return <Empty text="Project not found" />;
+  if (!p) return <Empty text={p === undefined ? 'Loading…' : 'Project not found'} />;
   const pt = tasks.filter((t) => t.projectId === p.id);
 
   function add() {

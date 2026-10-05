@@ -1,22 +1,28 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { MoreVertical, CheckCircle2, Check, Archive, Trash2, X, AlertCircle, Folder, ListChecks, ArchiveRestore, Filter, ArrowDownAZ, ArrowUpAZ, Plus, ArrowRight } from 'lucide-react';
 import { useHeaderSearch } from '../components/Layout';
-import { projects as initialProjects, tasks } from '../data/mock';
-
-type Project = (typeof initialProjects)[number];
+import { tasks, type Project } from '../data/mock';
+import { api, cacheProject, fetchProjects, uncacheProject } from '../lib/api';
+import { usePersistentState } from '../lib/persist';
 
 export default function Projects() {
   const navigate = useNavigate();
   const q = useHeaderSearch();
-  const [all, setAll] = useState<Project[]>(initialProjects);
-  const [archived, setArchived] = useState<Set<Project['id']>>(new Set());
+  const [all, setAll] = useState<Project[]>([]);
+  const [loadError, setLoadError] = useState('');
+  useEffect(() => {
+    fetchProjects()
+      .then((list) => { list.forEach(cacheProject); setAll(list); })
+      .catch((e: Error) => setLoadError(e.message));
+  }, []);
+  const [archived, setArchived] = usePersistentState<Set<Project['id']>>('projects:archived', () => new Set());
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<Set<Project['id']>>(new Set());
-  const [showArchived, setShowArchived] = useState(false);
+  const [showArchived, setShowArchived] = usePersistentState('projects:showArchived', false);
   const [toDelete, setToDelete] = useState<Project[] | null>(null);
 
-  const [sortAsc, setSortAsc] = useState(true);
+  const [sortAsc, setSortAsc] = usePersistentState('projects:sortAsc', true);
 
   const list = all
     .filter((p) => archived.has(p.id) === showArchived && p.name.toLowerCase().includes(q.toLowerCase()))
@@ -42,8 +48,17 @@ export default function Projects() {
     setArchived((a) => new Set([...a].filter((id) => !ids.includes(id))));
     setSelected(new Set());
   };
-  const confirmDelete = () => {
-    const ids = new Set(toDelete!.map((p) => p.id));
+  const confirmDelete = async () => {
+    const ids = new Set<Project['id']>();
+    for (const p of toDelete!) {
+      try {
+        await api(`/projects/${p.id}/`, { method: 'DELETE' });
+        ids.add(p.id);
+        uncacheProject(p.id);
+      } catch (e) {
+        setLoadError(`Could not delete "${p.name}": ${(e as Error).message}`);
+      }
+    }
     setAll((a) => a.filter((p) => !ids.has(p.id)));
     setSelected(new Set());
     setToDelete(null);
@@ -101,6 +116,7 @@ export default function Projects() {
         </div>
         <div className="mt-5 h-px bg-gradient-to-r from-transparent via-white/25 to-transparent" />
       </div>
+      {loadError && <p className="mb-4 text-sm text-red-400">{loadError}</p>}
       <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {list.map((p) => {
           const pt = tasks.filter((t) => t.projectId === p.id);
@@ -133,6 +149,7 @@ export default function Projects() {
               <div className="p-4">
                 <div className="flex items-start justify-between">
                   <h3 className="font-semibold">{p.name}</h3>
+                  {p.isLabeled && <span className="ml-auto mr-2 rounded-full border border-brand-500/40 bg-brand-500/10 px-2 py-0.5 text-[11px] font-semibold text-brand-500" title={`${p.annotated} annotated images`}>{p.datasetFormat} · Labeled</span>}
                   <MoreVertical className="h-4 w-4 text-muted" />
                 </div>
                 <p className="mt-1 text-xs text-muted">#{p.id} · Created by {p.owner} · Updated {p.updated}</p>

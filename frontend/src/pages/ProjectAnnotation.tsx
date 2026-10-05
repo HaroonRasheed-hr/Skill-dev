@@ -1,19 +1,30 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronDown, ChevronLeft, ChevronRight, Circle, Eye, EyeOff, Filter, Hand, Info, ListTree, Lock, LockOpen, Maximize,
   Menu, Minus, Pentagon, Plus, Redo2, RotateCcw, Save, ScanSearch, Spline, Square, SquareDashed,
   Grip, Trash2, Undo2, Wand2, ImageIcon,
+  ChevronsLeft, ChevronsRight, ClipboardPaste, Copy, Film, Pause, Play, SkipBack, SkipForward, StepBack, StepForward,
 } from 'lucide-react';
 import { Empty } from '../components/ui';
 import { useProject } from './ProjectDetail';
+import { usePersistentState } from '../lib/persist';
+import { api, fetchImages, type ApiAnnotation, type ApiImage } from '../lib/api';
 
 type Kind = 'rect' | 'polygon' | 'polyline' | 'points' | 'ellipse';
 type Tool = 'pan' | 'select' | 'ai' | Kind;
 type Pt = { x: number; y: number };
-type Shape = { id: number; image: number; kind: Kind; label: string; pts: Pt[]; hidden: boolean; locked: boolean };
+// dbId: the saved annotation's id in the backend, so saving updates it instead of re-creating it
+type Shape = { id: number; image: number; kind: Kind; label: string; pts: Pt[]; hidden: boolean; locked: boolean; dbId?: number };
 
 const W = 1000, H = 625;
+// The image is letterboxed (object-contain) inside the W×H canvas: scale + offset between the two spaces
+const fit = (img: ApiImage) => {
+  const k = Math.min(W / img.width, H / img.height);
+  return { k, ox: (W - img.width * k) / 2, oy: (H - img.height * k) / 2 };
+};
 const demo = (id: number) => Array.from({ length: 6 }, (_, i) => `https://picsum.photos/seed/p${id}-${i}/1000/625`);
+// Seconds as m:ss.s for the video timeline
+const clock = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
 
 // Hover card for each rail tool: what it does and its shortcut
 const toolHelp: Record<string, [string, string, string?]> = {
@@ -68,13 +79,15 @@ function BarBtn({ icon: Icon, text, onClick, disabled }: { icon: typeof Square; 
 
 export default function ProjectAnnotation() {
   const p = useProject();
-  const images = p?.media?.length ? p.media : demo(p?.id ?? 0);
+  const [stored, setStored] = useState<ApiImage[] | null>(null);
+  const images = stored?.length ? stored.map((i) => i.url) : p?.media?.length ? p.media : demo(p?.id ?? 0);
   const labels = p?.labels.length ? p.labels : [{ name: 'object', color: '#00c2f0' }];
 
-  const [index, setIndex] = useState(0);
-  const [tool, setTool] = useState<Tool>('rect');
-  const [label, setLabel] = useState(labels[0].name);
-  const [shapes, setShapes] = useState<Shape[]>([]);
+  const key = `project-annotation:${p?.id}`;
+  const [index, setIndex] = usePersistentState(`${key}:index`, 0);
+  const [tool, setTool] = usePersistentState<Tool>(`${key}:tool`, 'rect');
+  const [label, setLabel] = usePersistentState(`${key}:label`, labels[0].name);
+  const [shapes, setShapes] = usePersistentState<Shape[]>(`${key}:shapes`, []);
   const [history, setHistory] = useState<Shape[][]>([]);
   const [future, setFuture] = useState<Shape[][]>([]);
   const [active, setActive] = useState<number | null>(null);
@@ -87,34 +100,146 @@ export default function ProjectAnnotation() {
   const canvasRef = useRef<HTMLElement>(null);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState<Pt>({ x: 0, y: 0 });
-  const [tab, setTab] = useState<'objects' | 'labels' | 'issues'>('objects');
-  const [sort, setSort] = useState<'asc' | 'desc' | 'label'>('asc');
-  const [autosave, setAutosave] = useState(false);
+  const [tab, setTab] = usePersistentState<'objects' | 'labels' | 'issues'>(`${key}:tab`, 'objects');
+  const [sort, setSort] = usePersistentState<'asc' | 'desc' | 'label'>(`${key}:sort`, 'asc');
+  const [autosave, setAutosave] = usePersistentState(`${key}:autosave`, false);
   const [saved, setSaved] = useState(true);
-  const [opacity, setOpacity] = useState(30);
-  const [brightness, setBrightness] = useState(100);
+  const [opacity, setOpacity] = usePersistentState(`${key}:opacity`, 30);
+  const [brightness, setBrightness] = usePersistentState(`${key}:brightness`, 100);
   const [showAppearance, setShowAppearance] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [showPanel, setShowPanel] = useState(true);
+  const [showPanel, setShowPanel] = usePersistentState(`${key}:showPanel`, true);
   const svgRef = useRef<SVGSVGElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const drag = useRef<{ start: Pt; pan: Pt } | null>(null);
+  // Last saved payload per image, to only send images that changed
+  const savedPayload = useRef(new Map<number, string>());
+  const [saveError, setSaveError] = useState('');
+  const [playing, setPlaying] = useState(false);
+
+  // When the current image is a video frame: the indexes of all frames of that video, in order
+  const video = stored?.[index]?.video;
+  const clip = useMemo(() => (video && stored ? stored.flatMap((img, i) => (img.video === video ? [i] : [])) : []), [stored, video]);
+  const pos = clip.indexOf(index);
+  const times = clip.map((i) => stored?.[i]?.frame_time ?? 0);
+  const span = times.length > 1 ? times[times.length - 1] - times[0] : 0;
+  const clipFps = span > 0 ? (clip.length - 1) / span : 5;
+
+  // Load the project's images and saved annotations from the backend (points are image pixels)
+  const projectId = p?.id;
+  const projectLabels = p?.labels;
+  useEffect(() => {
+    if (!projectId || !projectLabels) return;
+    let live = true;
+    fetchImages(projectId).then((imgs) => {
+      if (!live) return;
+      const names = new Map(projectLabels.map((l) => [l.id, l.name]));
+      let id = 0;
+      const loaded = imgs.flatMap((img, i) => {
+        const { k, ox, oy } = fit(img);
+        return img.annotations.map((a): Shape => ({
+          id: ++id, image: i, kind: a.kind as Kind, label: names.get(a.label) ?? '', hidden: false, locked: false, dbId: a.id,
+          pts: a.points.map(([x, y]) => ({ x: x * k + ox, y: y * k + oy })),
+        }));
+      });
+      savedPayload.current = new Map(imgs.map((_, i) => [i, JSON.stringify(payload(loaded, imgs, i))]));
+      setStored(imgs);
+      setShapes(loaded);
+      setHistory([]);
+      setFuture([]);
+      setSaved(true);
+      setIndex((x) => Math.min(x, Math.max(0, imgs.length - 1)));
+    }).catch((e: Error) => live && setSaveError(`Could not load images: ${e.message}`));
+    return () => { live = false; };
+  }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Shapes of image i in the backend's format: kept ones (with id) first, then new ones
+  const labelIds = () => new Map((p?.labels ?? []).map((l) => [l.name, l.id]));
+  function ordered(list: Shape[], i: number) {
+    const ids = labelIds();
+    return list.filter((s) => s.image === i && ids.get(s.label) != null)
+      .sort((a, b) => (a.dbId == null ? 1 : 0) - (b.dbId == null ? 1 : 0) || (a.dbId ?? 0) - (b.dbId ?? 0));
+  }
+  function payload(list: Shape[], imgs: ApiImage[], i: number): ApiAnnotation[] {
+    const { k, ox, oy } = fit(imgs[i]);
+    const ids = labelIds();
+    const clamp = (v: number, max: number) => Math.min(max, Math.max(0, v));
+    return ordered(list, i).map((s) => ({
+        ...(s.dbId != null && { id: s.dbId }), label: ids.get(s.label)!, kind: s.kind,
+        points: s.pts.map((q): [number, number] => [clamp((q.x - ox) / k, imgs[i].width), clamp((q.y - oy) / k, imgs[i].height)]),
+      }));
+  }
+
+  // Sends every image whose annotations changed since the last save
+  async function save() {
+    if (!stored || !projectId) return setSaved(true);
+    setSaveError('');
+    const snapshot = shapes;
+    try {
+      for (let i = 0; i < stored.length; i++) {
+        const body = payload(snapshot, stored, i);
+        const json = JSON.stringify(body);
+        if (savedPayload.current.get(i) === json) continue;
+        const res = await api<ApiAnnotation[]>(`/projects/${projectId}/images/${stored[i].id}/annotations/`, { method: 'PUT', json: { annotations: body } });
+        // Response is ordered by id, matching the payload order: remember the new ids
+        const dbIds = new Map(ordered(snapshot, i).map((s, j) => [s.id, res[j]?.id]));
+        setShapes((cur) => cur.map((s) => (dbIds.has(s.id) ? { ...s, dbId: dbIds.get(s.id) } : s)));
+        savedPayload.current.set(i, JSON.stringify(body.map((b, j) => ({ id: res[j]?.id, ...b }))));
+      }
+      setSaved(true);
+    } catch (e) {
+      setSaveError(`Save failed: ${(e as Error).message}`);
+      setSaved(false);
+    }
+  }
+
+  // Autosave: save shortly after the last change
+  useEffect(() => {
+    if (!autosave || saved) return;
+    const t = setTimeout(save, 800);
+    return () => clearTimeout(t);
+  }); // eslint-disable-line react-hooks/exhaustive-deps
 
   const color = (name: string) => labels.find((l) => l.name === name)?.color ?? '#999';
   const onImage = shapes.filter((s) => s.image === index);
+  const annotated = new Set(shapes.map((s) => s.image));
   const listed = [...onImage].sort((a, b) => sort === 'label' ? a.label.localeCompare(b.label) : sort === 'asc' ? a.id - b.id : b.id - a.id);
 
   function commit(next: Shape[]) {
     setHistory((h) => [...h, shapes]);
     setFuture([]);
     setShapes(next);
-    setSaved(autosave);
+    setSaved(false);
   }
-  const undo = () => { if (!history.length) return; setFuture((f) => [shapes, ...f]); setShapes(history[history.length - 1]); setHistory((h) => h.slice(0, -1)); };
-  const redo = () => { if (!future.length) return; setHistory((h) => [...h, shapes]); setShapes(future[0]); setFuture((f) => f.slice(1)); };
+  const undo = () => { if (!history.length) return; setSaved(false); setFuture((f) => [shapes, ...f]); setShapes(history[history.length - 1]); setHistory((h) => h.slice(0, -1)); };
+  const redo = () => { if (!future.length) return; setSaved(false); setHistory((h) => [...h, shapes]); setShapes(future[0]); setFuture((f) => f.slice(1)); };
   const update = (id: number, patch: Partial<Shape>) => commit(shapes.map((s) => (s.id === id ? { ...s, ...patch } : s)));
   const resetView = () => { setZoom(1); setPan({ x: 0, y: 0 }); };
   const go = (i: number) => { setDraft(null); setActive(null); setIndex(Math.max(0, Math.min(images.length - 1, i))); };
+  const goFrame = (n: number) => { if (clip.length) go(clip[Math.max(0, Math.min(clip.length - 1, n))]); };
+
+  // Copies every shape of image `from` onto image `to` as new shapes (frames of a video share one size)
+  function copyShapes(from: number, to: number) {
+    const src = shapes.filter((s) => s.image === from);
+    if (!src.length) return;
+    let id = Math.max(0, ...shapes.map((s) => s.id));
+    commit([...shapes, ...src.map((s) => ({ ...s, id: ++id, image: to, hidden: false, locked: false, dbId: undefined }))]);
+  }
+  const copyFromPrev = () => { if (pos > 0) copyShapes(clip[pos - 1], index); };
+  const copyToNext = () => { if (pos < 0 || pos >= clip.length - 1) return; copyShapes(index, clip[pos + 1]); goFrame(pos + 1); };
+
+  // Playback: step through the video's frames at the rate they were extracted
+  useEffect(() => {
+    if (!playing) return;
+    if (pos < 0 || pos >= clip.length - 1) { setPlaying(false); return; }
+    const t = setTimeout(() => setIndex(clip[pos + 1]), 1000 / clipFps);
+    return () => clearTimeout(t);
+  }, [playing, index, clip]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Preload the next frames so stepping and playback don't flash
+  useEffect(() => {
+    clip.slice(pos + 1, pos + 4).forEach((i) => { new Image().src = images[i]; });
+  }, [index, clip]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function add(kind: Kind, pts: Pt[], name = label) {
     const id = Math.max(0, ...shapes.map((s) => s.id)) + 1;
@@ -155,7 +280,8 @@ export default function ProjectAnnotation() {
         return;
       }
       if ((e.target as HTMLElement).closest('input, select, textarea')) return;
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); finish(); }
+      if (e.key === ' ' && !draft && clip.length) { e.preventDefault(); setPlaying((x) => !x); }
+      else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); finish(); }
       else if (e.key === 'Escape') setDraft(null);
       else if (e.key === '+' || e.key === '=') setZoom((z) => Math.min(8, z * 1.25));
       else if (e.key === '-') setZoom((z) => Math.max(0.2, z / 1.25));
@@ -163,6 +289,11 @@ export default function ProjectAnnotation() {
       else if (e.key === 'Backspace' && draft) setDraft(draft.length > 1 ? draft.slice(0, -1) : null);
       else if (e.ctrlKey && e.key === 'z') undo();
       else if (e.ctrlKey && e.key === 'y') redo();
+      else if (clip.length && e.shiftKey && e.key === 'ArrowRight') goFrame(pos + 10);
+      else if (clip.length && e.shiftKey && e.key === 'ArrowLeft') goFrame(pos - 10);
+      else if (clip.length && e.key === 'Home') goFrame(0);
+      else if (clip.length && e.key === 'End') goFrame(clip.length - 1);
+      else if (clip.length && !e.ctrlKey && e.key.toLowerCase() === 'c') copyFromPrev();
       else if (e.key === 'd' || e.key === 'ArrowRight') go(index + 1);
       else if (e.key === 'a' || e.key === 'ArrowLeft') go(index - 1);
       else if (e.key === 'Delete' && active != null) commit(shapes.filter((s) => s.id !== active || s.locked));
@@ -177,6 +308,7 @@ export default function ProjectAnnotation() {
   }
   function onDown(e: React.MouseEvent) {
     if (e.button !== 0 || pending) return;
+    setPlaying(false);
     if (tool === 'pan' || tool === 'select' || tool === 'ai') {
       if (tool === 'select') setActive(null);
       drag.current = { start: { x: e.clientX, y: e.clientY }, pan };
@@ -251,9 +383,9 @@ export default function ProjectAnnotation() {
         <div className="flex items-stretch gap-2 2xl:gap-3">
           <div className="flex shrink-0 items-center rounded-lg border border-line bg-panel-2 py-1.5">
             <BarBtn icon={Menu} text="Menu" />
-            <BarBtn icon={Save} text={saved ? 'Saved' : 'Save'} onClick={() => setSaved(true)} />
+            <BarBtn icon={Save} text={saved ? 'Saved' : 'Save'} onClick={save} />
             <label className="flex shrink-0 items-center gap-2 whitespace-nowrap px-2 text-xs xl:text-sm" title="Autosave">
-              <button onClick={() => { setAutosave(!autosave); if (!autosave) setSaved(true); }} className={`relative h-5 w-9 rounded-full ${autosave ? 'bg-brand-500' : 'bg-panel-3'}`}>
+              <button onClick={() => setAutosave(!autosave)} className={`relative h-5 w-9 rounded-full ${autosave ? 'bg-brand-500' : 'bg-panel-3'}`}>
                 <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${autosave ? 'left-4.5' : 'left-0.5'}`} />
               </button>
               <span className="hidden lg:inline">Autosave {autosave ? 'ON' : 'OFF'}</span>
@@ -261,6 +393,7 @@ export default function ProjectAnnotation() {
             <BarBtn icon={Undo2} text="Undo" onClick={undo} disabled={!history.length} />
             <BarBtn icon={Redo2} text="Redo" onClick={redo} disabled={!future.length} />
           </div>
+          {saveError && <span className="self-center truncate text-xs text-red-400" title={saveError}>{saveError}</span>}
           <div className="flex shrink-0 items-center rounded-lg border border-line bg-panel-2 py-1.5">
             <BarBtn icon={ChevronLeft} text="Prev" onClick={() => go(index - 1)} disabled={index === 0} />
             <span className="whitespace-nowrap px-2 text-sm font-semibold">{index + 1} / {images.length}</span>
@@ -275,8 +408,9 @@ export default function ProjectAnnotation() {
         </div>
 
         <div className="flex min-h-0 flex-1 gap-2 2xl:gap-3">
+          <div className="flex min-w-0 flex-1 flex-col gap-2 2xl:gap-3">
           {/* Canvas */}
-          <section ref={canvasRef} className="relative min-w-0 flex-1 overflow-hidden rounded-lg bg-page" onWheel={onWheel}>
+          <section ref={canvasRef} className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg bg-page" onWheel={onWheel}>
             {drawing && (
               <div className="absolute left-2 right-12 top-2 z-10 flex w-fit max-w-[calc(100%-3.5rem)] items-center gap-2 rounded-lg bg-panel-2/95 p-1.5 text-sm shadow">
                 <span className="h-3 w-3 rounded" style={{ background: color(label) }} />
@@ -343,6 +477,33 @@ export default function ProjectAnnotation() {
             </div>
           </section>
 
+          {/* Video timeline: frame-by-frame navigation for images extracted from a video */}
+          {clip.length > 0 && (
+            <div className="flex shrink-0 items-center gap-1 rounded-lg border border-line bg-panel-2 px-1.5 py-1.5">
+              <span className="flex max-w-36 shrink-0 items-center gap-1.5 px-1 text-xs text-muted" title={video}><Film className="h-4 w-4 shrink-0" /><span className="hidden truncate 2xl:block">{video}</span></span>
+              <BarBtn icon={SkipBack} text="First (Home)" onClick={() => goFrame(0)} disabled={pos === 0} />
+              <BarBtn icon={ChevronsLeft} text="Back 10 (Shift+Left)" onClick={() => goFrame(pos - 10)} disabled={pos === 0} />
+              <BarBtn icon={StepBack} text="Prev frame (A)" onClick={() => goFrame(pos - 1)} disabled={pos === 0} />
+              <BarBtn icon={playing ? Pause : Play} text={playing ? 'Pause (Space)' : 'Play (Space)'} onClick={() => setPlaying(!playing)} disabled={!playing && pos === clip.length - 1} />
+              <BarBtn icon={StepForward} text="Next frame (D)" onClick={() => goFrame(pos + 1)} disabled={pos === clip.length - 1} />
+              <BarBtn icon={ChevronsRight} text="Forward 10 (Shift+Right)" onClick={() => goFrame(pos + 10)} disabled={pos === clip.length - 1} />
+              <BarBtn icon={SkipForward} text="Last (End)" onClick={() => goFrame(clip.length - 1)} disabled={pos === clip.length - 1} />
+              <div className="relative mx-2 min-w-24 flex-1">
+                {/* Marks frames that already have annotations */}
+                <div className="pointer-events-none absolute inset-x-2 -top-1.5 h-1.5">
+                  {clip.map((i, n) => annotated.has(i) && <span key={i} className="absolute h-1.5 w-0.5 -translate-x-1/2 rounded-full bg-brand-500" style={{ left: `${clip.length > 1 ? (n / (clip.length - 1)) * 100 : 0}%` }} />)}
+                </div>
+                <input type="range" min={0} max={clip.length - 1} value={pos} onChange={(e) => goFrame(+e.target.value)} className="w-full accent-brand-500" title="Scrub through the video's frames" />
+              </div>
+              <span className="shrink-0 whitespace-nowrap px-1 text-xs font-semibold tabular-nums">
+                {pos + 1} / {clip.length}<span className="ml-2 font-normal text-muted">{clock(times[pos] ?? 0)}</span>
+              </span>
+              <BarBtn icon={ClipboardPaste} text="Copy from prev (C)" onClick={copyFromPrev} disabled={pos === 0 || !annotated.has(clip[pos - 1])} />
+              <BarBtn icon={Copy} text="Copy to next" onClick={copyToNext} disabled={pos === clip.length - 1 || !onImage.length} />
+            </div>
+          )}
+          </div>
+
           {/* Right panel */}
           {showPanel ? (
             <aside className="relative flex w-60 shrink-0 flex-col rounded-lg border border-line bg-panel-2 p-2 xl:w-72 2xl:w-80 2xl:p-3">
@@ -367,7 +528,7 @@ export default function ProjectAnnotation() {
                       <button title="Hide all" onClick={() => commit(shapes.map((s) => s.image === index ? { ...s, hidden: !onImage.every((x) => x.hidden) } : s))}><EyeOff className="h-4 w-4" /></button>
                       <ChevronDown className="h-4 w-4" />
                     </div>
-                    <div className="flex-1 space-y-2 overflow-auto">
+                    <div className="no-scrollbar flex-1 space-y-2 overflow-y-auto overscroll-contain scroll-smooth">
                       {!listed.length && <p className="p-4 text-center text-sm text-muted">No objects yet. Pick a draw tool and annotate the image.</p>}
                       {listed.map((s) => (
                         <div key={s.id} onClick={() => setActive(s.id)} className={`rounded-md border-l-4 bg-panel-3 p-2 ${active === s.id ? 'ring-2 ring-brand-500/50' : ''}`} style={{ borderLeftColor: color(s.label) }}>
