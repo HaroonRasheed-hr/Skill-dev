@@ -19,9 +19,9 @@ services:
       context: ./backend
       target: web
     environment:
-      DJANGO_SETTINGS_MODULE: config.settings.local
+      DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.local}
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-local-only-change-me}
-      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,backend
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
       DATABASE_URL: postgres://${POSTGRES_USER:-skillwala}:${POSTGRES_PASSWORD:-skillwala}@db:5432/${POSTGRES_DB:-skillwala}
       MEDIA_ROOT: /app/media
       TRAINING_ROOT: /app/training_runs
@@ -50,9 +50,9 @@ services:
       context: ./backend
       target: worker
     environment:
-      DJANGO_SETTINGS_MODULE: config.settings.local
+      DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.local}
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-local-only-change-me}
-      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,backend
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
       DATABASE_URL: postgres://${POSTGRES_USER:-skillwala}:${POSTGRES_PASSWORD:-skillwala}@db:5432/${POSTGRES_DB:-skillwala}
       MEDIA_ROOT: /app/media
       TRAINING_ROOT: /app/training_runs

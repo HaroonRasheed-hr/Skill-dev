@@ -163,7 +163,7 @@ Open **http://localhost:3000** to use the application. Compose starts PostgreSQL
 
 Uploaded media, the database, and model checkpoints are kept in Docker volumes when containers stop. To stop the application, run `docker compose down`.
 
-The default database password and Django secret key are for local development only. Set `POSTGRES_PASSWORD` and `DJANGO_SECRET_KEY` in a `.env` file before exposing the application outside your machine. `APP_PORT` changes the frontend port, and `TRAINING_CPU_THREADS` controls the worker's CPU thread count.
+This Compose setup is for local development: its default password and secret key are not production credentials, and Nginx serves HTTP only. Do not expose it directly to the public internet. A production deployment needs production Django settings, strong secrets, and an HTTPS reverse proxy. `APP_PORT` changes the frontend port, and `TRAINING_CPU_THREADS` controls the worker's CPU thread count.
 
 ## 10. Run locally for development
 
