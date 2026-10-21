@@ -93,7 +93,7 @@ All three start from COCO-pretrained weights, with the classification head re-in
 
 - In development, Vite proxies `/api` and `/media` to Django on port 8000.
 - In production, Django serves the built React app (`frontend/dist`) through WhiteNoise, with an SPA catch-all route.
-- The training worker is a **separate process**, so the web server never needs PyTorch or MMDetection installed.
+- The training worker is a **separate process** for queued training. The web server also installs the CPU PyTorch/MMDetection runtime to serve model inference from the Test page.
 
 ## 6. Project structure
 
@@ -109,7 +109,7 @@ skill-dev/
 │   │   │   └── videos.py       # Frame extraction with OpenCV
 │   │   └── training/           # Training jobs, MMDetection config, runner, worker, inference
 │   ├── requirements.txt        # Web app dependencies
-│   ├── requirements-training.txt  # PyTorch + MMDetection (worker only)
+│   ├── requirements-training.txt  # CPU PyTorch + MMDetection (training and inference)
 │   └── docker-compose.yml      # PostgreSQL
 └── frontend/
     └── src/

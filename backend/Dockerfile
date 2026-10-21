@@ -23,16 +23,17 @@ RUN python -m pip install --upgrade pip \
 
 COPY . .
 
-FROM base AS web
+FROM base AS training-runtime
+COPY requirements-training.txt /tmp/requirements-training.txt
+RUN python -m pip install -r /tmp/requirements-training.txt \
+    && mim install "mmcv==2.1.0"
+
+FROM training-runtime AS web
 RUN python -m pip install "gunicorn>=22,<24"
 
 EXPOSE 8000
 
 CMD ["sh", "-c", "python manage.py migrate --noinput && python manage.py collectstatic --noinput && exec gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 120"]
 
-FROM base AS worker
-COPY requirements-training.txt /tmp/requirements-training.txt
-RUN python -m pip install -r /tmp/requirements-training.txt \
-    && mim install "mmcv==2.1.0"
-
+FROM training-runtime AS worker
 CMD ["python", "manage.py", "training_worker"]

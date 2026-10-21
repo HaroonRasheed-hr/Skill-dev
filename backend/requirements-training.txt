@@ -1,4 +1,4 @@
-# Training worker only (CPU build of PyTorch, no CUDA). Install after requirements.txt:
+# Training and inference (CPU build of PyTorch, no CUDA). Install after requirements.txt:
 #   pip install -r requirements-training.txt
 #   mim install "mmcv==2.1.0"      # prebuilt CPU wheel, matched to torch 2.1
 # MMDetection 3.3 needs mmcv>=2.0,<2.2, which has wheels for torch 2.1 only.

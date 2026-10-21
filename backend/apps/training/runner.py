@@ -1,7 +1,7 @@
 """Runs a TrainingJob with MMDetection on the CPU.
 
-torch/mmdet are imported lazily so the web app (and the test suite) never needs them;
-only the training worker process does. Install them with ``requirements-training.txt``.
+torch/mmdet are imported lazily so the web app only needs them when handling inference.
+The training worker also installs them with ``requirements-training.txt``.
 """
 import logging
 import os
