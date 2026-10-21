@@ -151,7 +151,21 @@ All endpoints are under `/api/v1/` and require a JWT `Bearer` token, except regi
 | GET | `/projects/{id}/training/jobs/{job_id}/checkpoint/` | Download the trained model |
 | POST | `/projects/{id}/training/jobs/{job_id}/infer/` | Run detection on an uploaded image |
 
-## 9. Getting started
+## 9. Run the full application with Docker
+
+Install Docker Desktop, then run this from the repository root:
+
+```bash
+docker compose up --build
+```
+
+Open **http://localhost:3000** to use the application. Compose starts PostgreSQL, the Django API, the CPU-based training worker, and the React frontend. The first build downloads the training dependencies and can take several minutes. Training runs on the CPU and may be slow for large datasets.
+
+Uploaded media, the database, and model checkpoints are kept in Docker volumes when containers stop. To stop the application, run `docker compose down`.
+
+The default database password and Django secret key are for local development only. Set `POSTGRES_PASSWORD` and `DJANGO_SECRET_KEY` in a `.env` file before exposing the application outside your machine. `APP_PORT` changes the frontend port, and `TRAINING_CPU_THREADS` controls the worker's CPU thread count.
+
+## 10. Run locally for development
 
 ### Backend
 ```bash
@@ -187,7 +201,7 @@ cd backend
 python manage.py test
 ```
 
-## 10. Configuration
+## 11. Configuration
 
 Key environment variables (see `backend/.env.example`):
 
@@ -203,7 +217,7 @@ Key environment variables (see `backend/.env.example`):
 | `TRAINING_DEFAULT_EPOCHS` / `TRAINING_MAX_EPOCHS` | 12 / 100 | Epoch limits |
 | `TRAINING_CPU_THREADS` | 0 (all cores) | CPU threads for training |
 
-## 11. Current status
+## 12. Current status
 
 - **Connected to the backend:** login/register, projects, dataset/media import, project annotation, training, models, and testing.
 - **Not yet connected to the backend:** the Tasks and Jobs screens (mock data in `frontend/src/data/mock.ts`) and the Teams and Notifications screens. Some API-backed pages also still use mock data for parts of the UI.

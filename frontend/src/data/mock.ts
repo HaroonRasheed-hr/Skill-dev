@@ -1,5 +1,5 @@
 export type Status = 'annotation' | 'validation' | 'completed';
-export type Label = { name: string; color: string };
+export type Label = { id?: number; name: string; color: string };
 
 export const labels: Label[] = [
   { name: 'car', color: '#f59e0b' },
@@ -8,7 +8,7 @@ export const labels: Label[] = [
   { name: 'traffic light', color: '#ef4444' },
 ];
 
-export type Project = { id: number; name: string; owner: string; updated: string; labels: Label[]; description?: string; color?: string; thumbnail?: string; media?: string[]; images?: number; annotated?: number; created?: string };
+export type Project = { id: number; name: string; owner: string; updated: string; labels: Label[]; description?: string; color?: string; thumbnail?: string; media?: string[]; images?: number; annotated?: number; created?: string; datasetFormat?: string; isLabeled?: boolean };
 
 export const projects: Project[] = [
   { id: 1, name: 'Urban Street Detection', owner: 'haroon', updated: '2 hours ago', labels },

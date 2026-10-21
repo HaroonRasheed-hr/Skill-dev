@@ -1,8 +1,81 @@
 services:
-  skill-dev:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-skillwala}
+      POSTGRES_USER: ${POSTGRES_USER:-skillwala}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-skillwala}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      target: web
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.local
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-local-only-change-me}
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,backend
+      DATABASE_URL: postgres://${POSTGRES_USER:-skillwala}:${POSTGRES_PASSWORD:-skillwala}@db:5432/${POSTGRES_DB:-skillwala}
+      MEDIA_ROOT: /app/media
+      TRAINING_ROOT: /app/training_runs
+    volumes:
+      - backend_media:/app/media
+      - training_runs:/app/training_runs
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/admin/login/', timeout=3)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ./backend
+      target: worker
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.local
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-local-only-change-me}
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,backend
+      DATABASE_URL: postgres://${POSTGRES_USER:-skillwala}:${POSTGRES_PASSWORD:-skillwala}@db:5432/${POSTGRES_DB:-skillwala}
+      MEDIA_ROOT: /app/media
+      TRAINING_ROOT: /app/training_runs
+      TRAINING_CPU_THREADS: ${TRAINING_CPU_THREADS:-2}
+    volumes:
+      - backend_media:/app/media
+      - training_runs:/app/training_runs
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
     build:
       context: ./frontend
-    container_name: Skill-dev
     ports:
-      - "3000:80"
+      - "${APP_PORT:-3000}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  postgres_data:
+  backend_media:
+  training_runs:

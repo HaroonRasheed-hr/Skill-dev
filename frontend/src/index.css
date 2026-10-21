@@ -43,6 +43,9 @@
   @media (min-width: 1920px) { html { font-size: 100%; } }
   *, ::before, ::after { border-color: var(--color-line); }
   input, button, textarea, select { font-family: inherit; }
+  /* Hide scrollbars everywhere; scrolling with wheel, touch and keys still works */
+  * { scrollbar-width: none; }
+  *::-webkit-scrollbar { display: none; }
 }
 
 @layer base {

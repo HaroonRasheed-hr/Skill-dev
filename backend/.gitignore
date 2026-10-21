@@ -1,0 +1,45 @@
+# Virtual environments
+.venv/
+venv/
+
+# Python bytecode / build
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Environment
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Django
+db.sqlite3
+db.sqlite3-journal
+staticfiles/
+media/
+
+# Training outputs / model weights
+training_runs/
+runs/
+*.pt
+*.onnx
+
+# Testing / tooling caches
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Logs
+*.log
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

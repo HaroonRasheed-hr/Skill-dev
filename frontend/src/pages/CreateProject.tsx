@@ -1,28 +1,38 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronRight, Plus, Eye, FileArchive, FilePlus2, Folder, LayoutGrid, PlusCircle, Tag, X } from 'lucide-react';
-import { projects, type Label } from '../data/mock';
+import type { Label } from '../data/mock';
+import { api, cacheProject, toProject, type ApiProject } from '../lib/api';
 import { checkDataset, type DatasetEntry, type DatasetFormat } from '../lib/datasetFormat';
+import { clearFiles, clearStored, loadFiles, saveFiles, usePersistentState } from '../lib/persist';
 
 const swatches = ['#FF5A5F', '#4FD1FF', '#3B6CFF'];
 const steps = ['Project Info', 'Dataset Definition', 'Review & Create'];
 
 type Media = { file: File; url: string };
-type Dataset = { kind: 'zip' | 'folder'; name: string; files: File[]; previews: Media[]; loading?: boolean; format?: DatasetFormat; annotated?: number };
+type Dataset = { kind: 'zip' | 'folder'; name: string; files: File[]; previews: Media[]; loading?: boolean; format?: DatasetFormat | null; annotated?: number };
+// What gets written to IndexedDB so an unfinished project survives a refresh
+type StoredMedia = Omit<Media, 'url'>;
+type StoredDraft = { media: StoredMedia[]; dataset: (Omit<Dataset, 'previews'> & { previews?: StoredMedia[] }) | null; thumb: number };
+const DRAFT = 'create-project';
 
 const mediaTypes: Record<string, string> = {
   jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', svg: 'image/svg+xml',
   mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', ogg: 'video/ogg',
+  ogv: 'video/ogg', m4v: 'video/mp4', avi: 'video/x-msvideo', mkv: 'video/x-matroska', mpeg: 'video/mpeg', mpg: 'video/mpeg',
 };
+// Frames per second the backend extracts from each video; 0 keeps every frame
+const fpsOptions: [number, string][] = [[1, '1 fps'], [2, '2 fps'], [5, '5 fps'], [10, '10 fps'], [15, '15 fps'], [30, '30 fps'], [0, 'Every frame']];
+const isVideo = (m: Media) => m.file.type.startsWith('video');
 const mediaType = (path: string) => mediaTypes[path.split('.').pop()?.toLowerCase() ?? ''];
 const toMedia = (file: File): Media => ({ file, url: URL.createObjectURL(file) });
 
-// Checks the dataset has images + annotations, then turns its images into previews
+// Checks the dataset has images + annotations (and/or videos), then turns them into previews
 async function loadDataset(entries: (DatasetEntry & { blob: () => Promise<Blob> })[]) {
   const check = await checkDataset(entries);
   if (!check.ok) return check;
   const byPath = new Map(entries.map((e) => [e.path, e]));
-  const previews = await Promise.all(check.images.map(async (img) =>
+  const previews = await Promise.all([...check.images, ...check.videos].map(async (img) =>
     toMedia(new File([await byPath.get(img.path)!.blob()], img.path.split('/').pop()!, { type: mediaType(img.path) }))));
   return { ...check, previews };
 }
@@ -31,6 +41,14 @@ async function zipEntries(zip: File) {
   const { default: JSZip } = await import('jszip');
   const archive = await JSZip.loadAsync(zip);
   return Object.values(archive.files).filter((f) => !f.dir).map((f) => ({ path: f.name, text: () => f.async('text'), blob: () => f.async('blob') }));
+}
+
+// The backend takes datasets as a ZIP, so an uploaded folder is zipped in the browser.
+async function folderZip(files: File[], name: string) {
+  const { default: JSZip } = await import('jszip');
+  const zip = new JSZip();
+  files.forEach((f) => zip.file(f.webkitRelativePath || f.name, f));
+  return new File([await zip.generateAsync({ type: 'blob' })], `${name}.zip`, { type: 'application/zip' });
 }
 
 const folderEntries = (files: File[]) => files.map((f) => ({ path: f.webkitRelativePath || f.name, text: () => f.text(), blob: async () => f as Blob }));
@@ -192,18 +210,20 @@ function LabelModal({ labels, onChange, onClose }: { labels: Label[]; onChange: 
 
 export default function CreateProject() {
   const navigate = useNavigate();
-  const [step, setStep] = useState(0);
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [color, setColor] = useState('#1DB4FF');
+  const [step, setStep] = usePersistentState(`${DRAFT}:step`, 0);
+  const [name, setName] = usePersistentState(`${DRAFT}:name`, '');
+  const [description, setDescription] = usePersistentState(`${DRAFT}:description`, '');
+  const [color, setColor] = usePersistentState(`${DRAFT}:color`, '#1DB4FF');
+  const [videoFps, setVideoFps] = usePersistentState(`${DRAFT}:videoFps`, 5);
   const [media, setMedia] = useState<Media[]>([]);
   const [dataset, setDataset] = useState<Dataset | null>(null);
   const [datasetMenu, setDatasetMenu] = useState(false);
-  const [labels, setLabels] = useState<Label[]>([]);
+  const [labels, setLabels] = usePersistentState<Label[]>(`${DRAFT}:labels`, []);
   const [addingLabel, setAddingLabel] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [preview, setPreview] = useState<Media | null>(null);
   const [gallery, setGallery] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [thumbnailUrl, setThumbnailUrl] = useState<string | null>(null);
   const mediaInput = useRef<HTMLInputElement>(null);
   const zipInput = useRef<HTMLInputElement>(null);
@@ -242,6 +262,7 @@ export default function CreateProject() {
   };
   const allMedia = [...media, ...(dataset?.previews ?? [])];
   const thumbnail = allMedia.find((m) => m.url === thumbnailUrl) ?? allMedia[0];
+  const hasVideo = allMedia.some(isVideo);
   const removeMedia = (m: Media) => {
     URL.revokeObjectURL(m.url);
     setMedia((list) => list.filter((x) => x !== m));
@@ -257,6 +278,42 @@ export default function CreateProject() {
 
   useEffect(() => () => media.forEach((m) => URL.revokeObjectURL(m.url)), []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Restore uploaded files/dataset from the last visit, then keep them saved as they change
+  const [restored, setRestored] = useState(false);
+  useEffect(() => {
+    let live = true;
+    loadFiles<StoredDraft>(DRAFT).then((draft) => {
+      if (!live) return;
+      if (draft) {
+        const restoredMedia = draft.media.map((m) => toMedia(m.file));
+        setMedia(restoredMedia);
+        const d = draft.dataset;
+        let previews: Media[] = [];
+        if (d?.previews) {
+          previews = d.previews.map((m) => toMedia(m.file));
+          setDataset({ ...d, previews, loading: false });
+        } else if (d) {
+          // It was still being read when the page closed: read it again
+          const files = d.files;
+          startDataset(d, d.kind === 'zip' ? () => zipEntries(files[0]) : async () => folderEntries(files));
+        }
+        setThumbnailUrl([...restoredMedia, ...previews][draft.thumb]?.url ?? null);
+      }
+      setRestored(true);
+    });
+    return () => { live = false; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!restored) return;
+    const strip = (m: Media): StoredMedia => ({ file: m.file });
+    saveFiles(DRAFT, {
+      media: media.map(strip),
+      dataset: dataset && { kind: dataset.kind, name: dataset.name, files: dataset.files, format: dataset.format, annotated: dataset.annotated, previews: dataset.loading ? undefined : dataset.previews.map(strip) },
+      thumb: Math.max(0, allMedia.findIndex((m) => m.url === thumbnailUrl)),
+    } satisfies StoredDraft);
+  }, [restored, media, dataset, thumbnailUrl]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const validate = () => {
     const e: Record<string, string> = {};
     if (step === 0 && !name.trim()) e.name = 'Project name is required';
@@ -271,16 +328,29 @@ export default function CreateProject() {
   const next = () => validate() && setStep((s) => s + 1);
 
 
-  const create = () => {
-    projects.push({
-      id: Math.max(0, ...projects.map((p) => p.id)) + 1, name: name.trim(), owner: 'haroon', updated: 'just now', labels,
-      description: description.trim() || undefined, color,
-      media: allMedia.filter((m) => m.file.type.startsWith('image')).map((m) => URL.createObjectURL(m.file)),
-      images: allMedia.length, annotated: dataset?.annotated ?? 0, created: new Date().toISOString(),
-      // Own object URL so it survives this page revoking its preview URLs on unmount
-      thumbnail: thumbnail && !thumbnail.file.type.startsWith('video') ? URL.createObjectURL(thumbnail.file) : undefined,
-    });
-    navigate('/projects');
+  // Saves the project in the backend; it imports the dataset's images and annotations.
+  const create = async () => {
+    setSaving(true);
+    setErrors({});
+    try {
+      const form = new FormData();
+      form.append('name', name.trim());
+      form.append('description', description.trim());
+      form.append('color', color);
+      form.append('labels', JSON.stringify(labels.map((l) => ({ name: l.name, color: l.color }))));
+      if (dataset) form.append('dataset', dataset.kind === 'zip' ? dataset.files[0] : await folderZip(dataset.files, dataset.name));
+      media.forEach((m) => form.append('media', m.file));
+      if (hasVideo) form.append('video_fps', String(videoFps));
+      const created = await api<ApiProject>('/projects/', { method: 'POST', body: form });
+      cacheProject(toProject(created));
+      clearStored(DRAFT);
+      clearFiles(DRAFT);
+      navigate('/projects');
+    } catch (err) {
+      setErrors({ create: (err as Error).message });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -356,7 +426,7 @@ export default function CreateProject() {
               {dataset && (
                 <span className="flex items-center gap-2 rounded-full border border-line px-3 py-1 text-xs text-muted">
                   {dataset.kind === 'zip' ? <FileArchive className="h-3.5 w-3.5" /> : <Folder className="h-3.5 w-3.5" />}
-                  <span className="max-w-48 truncate text-ink">{dataset.name}</span> · {dataset.loading ? 'Checking…' : <><span className="text-brand-500">{dataset.format}</span> · {dataset.annotated} annotated · {datasetSummary(dataset)}</>}
+                  <span className="max-w-48 truncate text-ink">{dataset.name}</span> · {dataset.loading ? 'Checking…' : <><span className="text-brand-500">{dataset.format ?? 'Video'}</span> · {dataset.annotated} annotated · {datasetSummary(dataset)}</>}
                   <button onClick={() => replaceDataset(null)} className="hover:text-ink"><X className="h-3.5 w-3.5" /></button>
                 </span>
               )}
@@ -391,6 +461,15 @@ export default function CreateProject() {
                 )}
               </div>
               <p className="mt-3 text-sm text-muted">{allMedia.length} file{allMedia.length !== 1 && 's'}{dataset ? ' in dataset' : ''}</p>
+              {hasVideo && (
+                <label className="mt-4 flex flex-wrap items-center gap-3 text-sm">
+                  <span className="font-semibold">Video frame rate</span>
+                  <select value={videoFps} onChange={(e) => setVideoFps(+e.target.value)} className="input w-36 py-1.5">
+                    {fpsOptions.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+                  </select>
+                  <span className="text-muted">Videos are split into frames at this rate for frame-by-frame annotation.</span>
+                </label>
+              )}
             </>
           )}
 
@@ -449,14 +528,16 @@ export default function CreateProject() {
                 {allMedia.length > 1 && <p className="mt-2 text-xs text-muted">+{allMedia.length - 1} more file{allMedia.length > 2 && 's'}</p>}
               </dd>
             </>)}
-            {dataset && (<><dt className="text-muted">Dataset</dt><dd><span className="font-semibold">{dataset.name}</span> <span className="text-xs text-muted">({dataset.kind === 'zip' ? 'ZIP' : 'Folder'} · {dataset.format} · {dataset.annotated} annotated images · {datasetSummary(dataset)})</span></dd></>)}
+            {dataset && (<><dt className="text-muted">Dataset</dt><dd><span className="font-semibold">{dataset.name}</span> <span className="text-xs text-muted">({dataset.kind === 'zip' ? 'ZIP' : 'Folder'} · {dataset.format ?? 'Video'} · {dataset.annotated} annotated images · {datasetSummary(dataset)})</span></dd></>)}
+            {hasVideo && (<><dt className="text-muted">Video frame rate</dt><dd className="font-semibold">{fpsOptions.find(([v]) => v === videoFps)?.[1] ?? `${videoFps} fps`}</dd></>)}
           </dl>
         </>
       )}
 
+      {step === 2 && <FieldError text={errors.create} />}
       <div className={`mt-10 flex ${step === 0 ? 'justify-end' : 'justify-between'}`}>
         {step > 0 && <button className="btn rounded-lg bg-panel-2 px-6 py-3 text-muted hover:text-ink" onClick={() => { setErrors({}); setStep(step - 1); }}>Previous</button>}
-        {step < 2 ? <ArrowButton onClick={next}>Next</ArrowButton> : <ArrowButton onClick={create}>Create Project</ArrowButton>}
+        {step < 2 ? <ArrowButton onClick={next}>Next</ArrowButton> : <ArrowButton onClick={create} disabled={saving}>{saving ? 'Creating…' : 'Create Project'}</ArrowButton>}
       </div>
 
       {addingLabel && (
