@@ -3,8 +3,8 @@ services:
     image: postgres:17-alpine
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-skillwala}
-      POSTGRES_USER: ${POSTGRES_USER:-skillwala}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-skillwala}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -20,9 +20,9 @@ services:
       target: web
     environment:
       DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.local}
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-local-only-change-me}
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?set DJANGO_SECRET_KEY}
       DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
-      DATABASE_URL: postgres://${POSTGRES_USER:-skillwala}:${POSTGRES_PASSWORD:-skillwala}@db:5432/${POSTGRES_DB:-skillwala}
+      DATABASE_URL: postgres://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-skillwala}
       MEDIA_ROOT: /app/media
       TRAINING_ROOT: /app/training_runs
     volumes:
@@ -51,9 +51,9 @@ services:
       target: worker
     environment:
       DJANGO_SETTINGS_MODULE: ${DJANGO_SETTINGS_MODULE:-config.settings.local}
-      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-local-only-change-me}
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?set DJANGO_SECRET_KEY}
       DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
-      DATABASE_URL: postgres://${POSTGRES_USER:-skillwala}:${POSTGRES_PASSWORD:-skillwala}@db:5432/${POSTGRES_DB:-skillwala}
+      DATABASE_URL: postgres://${POSTGRES_USER:?set POSTGRES_USER}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-skillwala}
       MEDIA_ROOT: /app/media
       TRAINING_ROOT: /app/training_runs
       TRAINING_CPU_THREADS: ${TRAINING_CPU_THREADS:-2}
@@ -68,6 +68,8 @@ services:
   frontend:
     build:
       context: ./frontend
+    volumes:
+      - backend_media:/app/media:ro
     ports:
       - "${APP_PORT:-3000}:80"
     depends_on:

@@ -56,7 +56,7 @@ class CreateProjectTests(ProjectApiTestCase):
         self.assertEqual(res.data["annotated_count"], 2)
         self.assertEqual(res.data["color"], "#FF5A5F")
         self.assertEqual([l["name"] for l in res.data["labels"]], ["car", "person"])
-        self.assertTrue(res.data["thumbnail"].startswith("http://testserver/media/projects/"))
+        self.assertTrue(res.data["thumbnail"].startswith("/media/projects/"))
 
         project = Project.objects.get(pk=res.data["id"])
         self.assertEqual(project.owner, self.user)
@@ -196,6 +196,7 @@ class ProjectReadTests(ProjectApiTestCase):
         self.assertEqual(res.data["count"], 3)
         first = res.data["results"][0]
         self.assertEqual(first["original_name"], "data/images/a.png")
+        self.assertTrue(first["url"].startswith("/media/projects/"))
         self.assertEqual((first["width"], first["height"]), (100, 50))
         car = Label.objects.get(project_id=pk, name="car")
         self.assertEqual(first["annotations"], [

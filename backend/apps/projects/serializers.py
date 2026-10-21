@@ -38,7 +38,7 @@ class ProjectSerializer(serializers.ModelSerializer):
         read_only_fields = ("dataset_name", "dataset_format", "created_at", "updated_at")
 
     def get_thumbnail(self, project):
-        return _file_url(self.context.get("request"), project.thumbnail.file) if project.thumbnail else None
+        return _file_url(project.thumbnail.file) if project.thumbnail else None
 
     def get_is_labeled(self, project):
         """True when the uploaded dataset brought its own annotations."""
@@ -151,8 +151,8 @@ class ImageSerializer(serializers.ModelSerializer):
         fields = ("id", "url", "original_name", "width", "height", "video", "frame_index", "frame_time", "annotations")
 
     def get_url(self, image):
-        return _file_url(self.context.get("request"), image.file)
+        return _file_url(image.file)
 
 
-def _file_url(request, file):
-    return request.build_absolute_uri(file.url) if request else file.url
+def _file_url(file):
+    return file.url

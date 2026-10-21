@@ -156,14 +156,16 @@ All endpoints are under `/api/v1/` and require a JWT `Bearer` token, except regi
 Install Docker Desktop, then run this from the repository root:
 
 ```bash
-docker compose up --build
+copy backend\.env.example backend\.env
+# Set DJANGO_SECRET_KEY, POSTGRES_USER, and POSTGRES_PASSWORD in backend\.env.
+docker compose --env-file backend/.env up --build
 ```
 
 Open **http://localhost:3000** to use the application. Compose starts PostgreSQL, the Django API, the CPU-based training worker, and the React frontend. The first build downloads the training dependencies and can take several minutes. Training runs on the CPU and may be slow for large datasets.
 
 Uploaded media, the database, and model checkpoints are kept in Docker volumes when containers stop. To stop the application, run `docker compose down`.
 
-This Compose setup is for local development: its default password and secret key are not production credentials, and Nginx serves HTTP only. Do not expose it directly to the public internet. A production deployment needs production Django settings, strong secrets, and an HTTPS reverse proxy. `APP_PORT` changes the frontend port, and `TRAINING_CPU_THREADS` controls the worker's CPU thread count.
+This Compose setup is for local development and Nginx serves HTTP only. Do not expose it directly to the public internet. A production deployment needs production Django settings, strong secrets, and an HTTPS reverse proxy. `APP_PORT` changes the frontend port, and `TRAINING_CPU_THREADS` controls the worker's CPU thread count.
 
 ## 10. Run locally for development
 
